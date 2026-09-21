@@ -1,0 +1,52 @@
+; Sandland classifier output grammar — taxonomy auto-tagging (v0.1)
+; Contract for spec FR-007..FR-010 and plan D3. Single source of truth: this file is embedded with
+; include_str! into crates/sandland-infer/src/grammar.rs, and its SHA-256 is recorded as
+; classification.grammar_sha in every audit event and in every item frontmatter block.
+;
+; Shape is enforced here; semantics are enforced deterministically in Rust (see NOTES at the bottom).
+; Key order is FIXED so decoding can fail fast: summary, category, tags.
+
+root ::= obj
+
+obj        ::= "{" ws "\"summary\"" ":" summary "," ws "\"category\"" ":" category "," ws "\"tags\"" ":" taglist ws "}"
+category   ::= "{" ws "\"term\"" ":" kebab "," ws "\"is_new\"" ":" boolean "," ws "\"confidence\"" ":" number ws "}"
+taglist    ::= "[" ws (tag ("," ws tag){0,4})? ws "]"
+tag        ::= "{" ws "\"term\"" ":" kebab "," ws "\"is_new\"" ":" boolean ("," ws "\"justification_if_new\"" ":" prose)? ws "}"
+
+; Terms are kebab-case BY GRAMMAR, so the Rust normalizer's kebab step can only singularize/merge and never
+; has to repair case or separators. 1..48 chars, max 8 segments.
+kebab      ::= "\"" [a-z0-9]+ ("-" [a-z0-9]+){0,7} "\""
+
+; Free text fields: bounded so a runaway generation cannot exceed the review UI, and quotes/backslashes must
+; be escaped (no raw control characters allowed inside a string).
+summary    ::= "\"" [^"\\]{4,600} "\""
+prose      ::= "\"" [^"\\]{4,200} "\""
+
+boolean    ::= "true" | "false"
+
+; Fixed vs RFC §3: the RFC's number ::= [0-9]+ "." [0-9]+ cannot express an integer confidence (1, or 0),
+; so a valid whole-number confidence was counted as malformed output and burned a fallback stage. The rule
+; below accepts 0, 1 and any decimal between them, and rejects negatives, exponents and >1 by construction.
+number     ::= "0" ("." [0-9]{1,6})? | "1" ("." [0-9]{1,6})?
+
+ws         ::= [ \t\n\r]*
+
+; ─── NOTES (informative, not part of the grammar) ────────────────────────────────────────────────────────
+; Deterministic Rust post-processor additionally enforces, in this order (plan D3, research §VII rules):
+;   1. confidence is range-checked by the grammar, so the Rust side only rejects 0 (and 0.0, 0.000000): a
+;      zero-confidence term is discarded, and if that empties the result the attempt fails to stage 2.
+;   2. singularize + normalize the kebab term (grammar already guarantees charset/case).
+;   3. Levenshtein distance <= 2 against the active vocabulary ⇒ silent merge onto the existing term.
+;   4. cosine similarity >= 0.92 against taxonomy_cache.json ⇒ existing term becomes canonical, proposal
+;      is stored as an alias with reason='cosine'.
+;   5. is_new=true requires a non-empty justification_if_new; a missing one is NOT repaired — it fails the
+;      attempt and advances the ladder (a model that invents a term without arguing for it is not trusted).
+;   6. duplicate terms after normalization collapse to one, highest confidence wins, ties keep the existing term.
+; Any parse failure at any step advances the fallback ladder exactly one stage (never a retry loop):
+; stage2 retry @ temperature 0.0 with 2000-token window -> stage3 TF-IDF+regex ∪ cosine (>0.72) ->
+; stage4 needs_manual_review=true + audit event + UI indicator.
+;
+; Test triples kept in CI (constitution §VII.2 lockstep):
+;   a) every golden payload in ./fixtures/classifier/*.json parses against this grammar;
+;   b) a proptest generator over the Rust ClassifierOutput type emits only payloads this grammar accepts;
+;   c) cargo-fuzz target proves no byte sequence decodes into a ClassifierOutput that fails serde validation.
