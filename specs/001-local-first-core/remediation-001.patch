@@ -1,0 +1,641 @@
+diff --git a/specs/001-local-first-core/spec.md b/specs/001-local-first-core/spec.md
+--- a/specs/001-local-first-core/spec.md
++++ b/specs/001-local-first-core/spec.md
+@@ -51,6 +51,10 @@
+    lost.
+ 5. **Given** a search query, **When** results render, **Then** the item matching the exact phrase and the
+    item matching only conceptually both appear, ranked above unrelated material.
++6. **Given** a phrase that occurs only in an item's body and never in its title, **When** the user searches for
++   it, **Then** the item is found — the lexical leg indexes bodies, not merely titles.
++7. **Given** a vault already open in another instance, **When** a second instance opens it, **Then** the second
++   is warned and read-only, and no write from either instance silently overwrites the other.
+ 
+ ---
+ 
+@@ -76,7 +80,8 @@
+ 3. **Given** two workspaces, **When** the user works in one, **Then** nothing in that session can read or
+    write the other workspace's files.
+ 4. **Given** a board with 1,000 nodes, **When** the user zooms out past the far threshold, **Then** text is
+-   dropped in favour of solid proxy shapes and interaction remains responsive.
++   dropped in favour of solid proxy shapes, no input event is delayed beyond 100 ms, and the frame rate stays
++   at or above 30 FPS p50.
+ 5. **Given** an idle board, **When** the user stops interacting for a couple of seconds, **Then** a
+    human-readable mirror of the topology appears alongside the fast binary state, byte-stable for diffing.
+ 
+@@ -214,7 +219,10 @@
+ - **FR-024**: Models MUST be unloaded after five minutes without inference, and idle memory MUST return to
+   the idle budget.
+ - **FR-025**: The application MUST be fully usable offline; no default behaviour may depend on a remote
+-  service, and no usage data may leave the machine without explicit per-destination consent.
++  service, and no usage data may leave the machine without explicit per-destination consent. v0.1 ships no
++  egress-capable feature, so the per-destination consent store and its UI are not required here; the build is
++  instead verified to contain no telemetry at all (enforced by the `deny.toml` denylist in T008 and by
++  `tests/security/egress.rs`).
+ - **FR-026**: Cold start MUST reach interactive canvas state in under 2.2 s on NVMe and 4.5 s on
+   HDD/SATA, with per-workspace lazy loading permitted.
+ - **FR-027**: Memory MUST stay within 350 MB idle, 650 MB while indexing, and 2.8 GB during local
+@@ -226,6 +234,9 @@
+   English material.
+ - **FR-030**: A file watcher MUST keep the index consistent with external edits to the vault without
+   rewriting user content.
++- **FR-031**: The system MUST detect that a vault is already open in another instance and MUST warn the second
++  opener and serve it read-only, rather than letting two processes write the same vault. Detection is a
++  per-vault lease, not a per-application lock, so two different vaults remain concurrent.
+ 
+ ### Key Entities
+ 
+@@ -250,10 +261,12 @@
+ 
+ ### Measurable Outcomes
+ 
+-- **SC-001**: 100% of captured material is recoverable by opening the vault with external tools — no feature
+-  depends on the index existing.
++- **SC-001**: 100% of captured material is recoverable by opening the vault with external tools — this
++  criterion is about *format and readability* alone; index independence is measured by SC-002, and the two stay
++  separate so a passing SC-001 can never be read as a passing rebuild.
+ - **SC-002**: After the derived index is deleted and rebuilt, search results and the exported vault are
+-  identical to before on the reference corpus.
++  identical to before on the reference corpus — the *rebuild-equivalence* criterion, and the one the constitution's
++  index-destruction gate points at.
+ - **SC-003**: Capture-to-visible-in-list is under 1 s for a 5 MB item, p95, and a user-triggered search
+   returns in under 150 ms p95 on a 5,000-item vault.
+ - **SC-004**: 0 items end in an unknown state: every capture resolves to a classification, a fallback
+@@ -262,8 +275,9 @@
+   week of use, measured on the internal review queue.
+ - **SC-006**: A SIGKILL during active editing loses at most 500 ms of typed content and produces 0 corrupt
+   documents across 200 trials.
+-- **SC-007**: The canvas holds 60 FPS p50 with 1,000 nodes and stays interactive at 10,000 nodes with the
+-  far-tier proxying active.
++- **SC-007**: The canvas holds 60 FPS p50 with 1,000 nodes. At 10,000 nodes with far-tier proxying active,
++  "interactive" means ≥ 30 FPS p50 with no input event delayed beyond 100 ms; in v0.1 that tier is measured and
++  reported, and becomes a blocking gate when the reference machine is named (OD-1, OD-6).
+ - **SC-008**: Every escape attempt in the adversarial suite (symlink, rename race, traversal, absolute path)
+   is denied, and 100% of denials appear in the audit log and the UI.
+ - **SC-009**: 0 model loads succeed from an unapproved or hash-mismatched file, across corrupted, truncated,
+@@ -283,6 +297,8 @@
+ - Voice transcription / Whisper, despite its presence in the RFC resource budgets for indexing.
+ - Windows confinement (Job Object + restricted token): see *Assumptions* and the plan's Complexity Tracking.
+ - Model download UX beyond integrity verification: v0.1 assumes approved model files are supplied.
++- The telemetry/egress consent surface FR-025 implies (per-destination opt-in UI and its persistence): first
++  needed when an optional model CDN or a cloud copilot endpoint ships.
+ 
+ ## Assumptions
+ 
+@@ -300,6 +316,6 @@
+ - Portuguese and English are the only languages exercised in v0.1 acceptance, per the team's working
+   languages; other languages are expected to degrade to the keyword path, not to fail.
+ - Single-user, single-instance-per-vault is assumed for v0.1; concurrent instances are an error condition
+-  to be detected and warned about, not a supported collaboration mode.
++  to be detected and warned about (FR-031), not a supported collaboration mode.
+ - The board's fast binary topology form is authoritative; the human-readable mirror is best-effort and may
+   lag by the idle threshold.
+diff --git a/specs/001-local-first-core/plan.md b/specs/001-local-first-core/plan.md
+--- a/specs/001-local-first-core/plan.md
++++ b/specs/001-local-first-core/plan.md
+@@ -22,8 +22,9 @@
+ identity plus Landlock/Seatbelt, not as a string-prefix check, which is why the RFC's `secure_read_to_string`
+ snippet is replaced by an `openat2`/`fstat` design (see [research.md](./research.md) D4).
+ 
+-Scope is v0.1 only: no Peça editor, no web extraction, no RLM hierarchy, no Whisper, no Windows agent cage
+-(fail-closed instead of uncaged).
++Scope is whatever `spec.md → "Out of Scope for This Feature"` says; this plan deliberately does not restate
++it, because restating it is how the two lists start to drift. The one consequence worth naming twice: the Windows
++agent cage is **fail-closed**, not silently absent (V1).
+ 
+ ## Technical Context
+ 
+@@ -51,14 +52,14 @@
+ macOS Apple Silicon and Intel (Seatbelt profile), Windows x86_64 (index/vault/canvas only; agent capabilities
+ fail-closed until the Job Object cage ships). Packaged as a native Tauri bundle per target.
+ 
+-**Project Type**: Desktop application — cargo workspace (10 library crates + 1 Tauri app crate) + 1 web
++**Project Type**: Desktop application — cargo workspace (10 library crates + 3 auxiliary binaries: `sandland-fixtures`, `sandland-cli`, `sandland-perf` + 1 Tauri app crate) + 1 web
+ frontend package.
+ 
+ **Performance Goals**: 60 FPS p50 at 1,000 nodes (interactive at 10,000 with far-tier proxies), search
+ < 150 ms p95 on 5,000 items, capture-to-visible < 1 s p95 for 5 MB, cold start < 2.2 s NVMe / < 4.5 s HDD,
+ idle RSS ≤ 350 MB, indexing ≤ 650 MB, inference ≤ 2.8 GB, unload within 5 min of last inference.
+ 
+-**Constraints**: Local-first (no cloud round-trip in any default path, no telemetry, no resident daemons);
++**Constraints**: Local-first (no cloud round-trip in any default path, no telemetry, no resident daemons); per-vault lease makes a second instance read-only (FR-031);
+ Rust-native backend only, Tauri WebView and (deferred) Chromium are the only non-Rust runtimes;
+ grammar-constrained inference mandatory with a total fallback ladder; kernel-enforced confinement with
+ fail-closed behaviour; atomic writes with ≤ 500 ms loss window; index reconstructibility as a release gate.
+@@ -67,7 +68,7 @@
+ 
+ **Scale/Scope**: Single user; 1–10 vaults; 5,000-item reference corpus (~150 MB Markdown, 2,000 assets)
+ with a 50,000-item stress ceiling; 1,000-node reference board, 10,000-node ceiling; 10–15 k LOC Rust +
+-6–8 k LOC TS for v0.1; ~14 weeks of implementation across 5 phases (see `tasks.md`, produced by
++6–8 k LOC TS for v0.1; ~14 weeks of implementation across the 7 phases of `tasks.md` (produced by
+ `/speckit-tasks`).
+ 
+ ## Constitution Check
+@@ -85,7 +86,7 @@
+ | VII | Grammar-Constrained Local Inference | `contracts/taxonomy-gbnf.gbnf` is the single grammar artifact, embedded at build, fuzzed for conformance, and versioned with the Rust schema (D3); 4-stage ladder terminates in `needs_manual_review`; 15 s bounded attempts off the UI thread | PASS |
+ | VIII | Test-First and Admitted Dependencies | Every crate listed above requires an ADR before `Cargo.toml` changes (D10); ≥ 90 % coverage + property tests mandated for `vault`, `sandbox`, `audit`, `taxonomy` normalization; fmt/clippy `-D warnings`/deny/miri/5-target matrix in CI; TS side type-checked against generated bindings | PASS |
+ 
+-**Gate decision**: no unjustified violations — proceed past Phase 0. Two items are recorded in
++**Gate decision**: no unjustified violations — proceed past Phase 0. Three items are recorded in
+ *Complexity Tracking* (V1 Windows cage deferral against the five-target rule; V2 audit log as a durable
+ non-reconstructible database). One inherited blocker is not a design violation but a precondition for the
+ perf gates: the reference machine must be named by ADR.
+@@ -93,7 +94,7 @@
+ **Post-Phase 1 re-check** (after `data-model.md`, `contracts/`, `quickstart.md`): all eight gates still PASS.
+ Specifically — the IPC contract exposes no path-free arbitrary file access (every command takes an item or
+ cell id, never a caller-supplied absolute path, closing a class of traversal at the API edge, D5); the
+-`items_fts` external-content binding cannot desync from `items` (D7); the review-queue resolution flow keeps
++`items_fts` is written only by the `item_docs_ai/ad/au` triggers and a body-only query is asserted by T047 (D7 as corrected by `/speckit-analyze` F1 — the earlier view form would have indexed nothing); the review-queue resolution flow keeps
+ ingest bodies immutable (D6); the board codec cannot emit a mirror newer than its source (D8). No new
+ violations were introduced by the design, so the plan advances to `/speckit-tasks` without a re-plan.
+ 
+@@ -148,8 +149,14 @@
+ │   └── src/{log.rs,undo.rs,events.rs}
+ ├── sandland-sandbox/            # Capability probe + Landlock/Seatbelt/Job-Object, fail-closed policy
+ │   └── src/{probe.rs,landlock.rs,seatbelt.rs,noop.rs}
+-└── sandland-models/             # models.lock.toml + checksum fixtures, verified fetch/verify helpers
+-    └── src/{lockfile.rs,fetch.rs}
++├── sandland-models/             # models.lock.toml + checksum fixtures, verified fetch/verify helpers
++│   └── src/{lockfile.rs,integrity.rs,fetch.rs}
++├── sandland-cli/                # operator + validation binary: vault-fsck, export, reindex (no IPC, no network)
++│   └── src/main.rs
++├── sandland-fixtures/           # deterministic corpus/board generation for tests and the acceptance gates
++│   └── src/main.rs
++└── sandland-perf/               # idle-rss / cold-start / offline-session harness, writes budgets.lock baselines
++    └── src/{main.rs,sample.rs}
+ 
+ apps/
+ └── desktop/
+diff --git a/specs/001-local-first-core/research.md b/specs/001-local-first-core/research.md
+--- a/specs/001-local-first-core/research.md
++++ b/specs/001-local-first-core/research.md
+@@ -123,29 +123,41 @@
+ ## D7 — Index topology: single writer, external-content FTS5, RRF in SQL, wipe-on-version
+ 
+ **Decision**: One writer task owns all `index.db` mutations (mpsc channel, `begin`/`commit` per batch of ≤ 200
+-mutations); readers use separate WAL connections. `items` is the anchor table; `items_fts` is an
+-**external-content** FTS5 table keyed to an integer `rid` maintained in `items` (`INTEGER PRIMARY KEY AUTOINCREMENT`
+-alias semantics with a `TEXT` id column), so the FTS index cannot hold a second copy of the text and cannot
+-drift from the row it mirrors. `vec_items` is a `vec0` virtual table with `embedding FLOAT[384]` and
++mutations); readers use separate WAL connections. `items` is the anchor table. The lexical leg is an
++**external-content** FTS5 table (`items_fts`) whose source is a dedicated `item_docs(rid, title, content)` table
++keyed to the same integer `rid`, with postings maintained only by insert/update/delete triggers inside the
++writer's transaction. `item_docs` deliberately holds a second copy of the body **inside the disposable index**:
++§I.2 constrains the vault, not a rebuildable cache. The column is named `content`, not `body`, because FTS5
++resolves external-content columns by exact name with no aliasing -- verified against SQLite 3.40, a mismatched
++or constant column yields an index that looks healthy and answers no body query. `vec_items` is a `vec0` virtual table with `embedding FLOAT[384]` and
+ `item_id` mapped to the same id. Hybrid search is the RFC's single-query RRF with `k = 60`, `distance < 0.85`
+ and a 100-result leg. `PRAGMA application_id`/`user_version` gate the whole file: a version or embedding-model
+-mismatch means **delete the file and rebuild from the vault**, never migrate. `journal_mode=WAL`,
+-`synchronous=NORMAL`, `busy_timeout=5000`.
++mismatch means **delete the file and rebuild from the vault**, never migrate. `journal_mode=WAL`, `synchronous=NORMAL`, `busy_timeout=5000` and `foreign_keys=ON` — the last
++one is not a default, and the cascade edges that keep `item_docs` / `vec_items` / `asset_refs` honest are inert
++without it, so `store.rs` sets it on every connection (R-10: executing §3's DDL with the pragma off left an orphan
++projection row and its postings behind; a rebuild would have masked it).
+ 
+ `audit_log.db` is the opposite: it is a record, so it carries forward-only migrations
+ (`schema_version` table, no `DELETE` of history), `synchronous=FULL`, and is opened read-only by any component
+ that only reports.
+ 
+-**Rationale**: External-content FTS halves the disk footprint and removes a class of desync bug; the
++**Rationale** *(corrected after `/speckit-analyze` F1/F2: the first draft claimed a view could supply body
++text "on demand" and rejected duplication "on vault-size grounds" -- the former silently empties the lexical leg,
++and the latter conflated vault-side duplication with index-side duplication)*: external-content FTS keeps the
++postings small and makes desync structural rather than incidental (the row, not the index, answers for content); the
+ single-writer task is what makes "index reflects the vault" true under concurrent watcher events without
+ `SQLITE_BUSY` retries in business logic. Splitting disposable (index) from durable (audit) is exactly the
+ distinction §I.2/§V.2 force us to make — and a "migration" for a disposable cache is wasted complexity.
+ `synchronous=FULL` only where data is irrecoverable.
+ 
+ **Alternatives considered**: (a) Migrate `index.db` across versions — rejected by §I.3 and as needless code.
+-(b) `contentless` FTS5 (`content=''`) — rejected: deletion requires `content=`-style coordination and
+-rowid-based `DELETE`, more fragile than external content for a rebuildable cache. (c) Two tables with the text
+-duplicated — rejected on vault-size and drift. (d) `synchronous=OFF` on the index for reindex throughput —
++(b) `contentless` FTS5 (`content=''`) — reconsidered and still rejected: it stores no text, so snippet
++rendering for FR-006 must re-open the vault file per hit, and its delete path needs rowid bookkeeping the
++triggers give for free. (c) Duplicating body text in the **vault** — rejected, it would create a second
++authoritative copy of user content (§I.1); distinct from `item_docs`, which duplicates only in the rebuildable
++index. (c') A `VIEW` as the `content=` source — rejected by experiment: SQLite accepts the DDL, then indexes
++nothing, which fails silently rather than loudly. (d') `content='items'` with body added to `items` — rejected:
++it inflates the hot anchor row that the list/review queries scan for every page. (d) `synchronous=OFF` on the index for reindex throughput —
+ rejected: crash mid-reindex would leave a corrupt-looking index; instead reindex resumes by hash. (e) Let the
+ reindex hold a write transaction for the whole vault — rejected: blocks the writer and wrecks FR-003 latency.
+ 
+@@ -235,8 +247,11 @@
+ normalization, mpk encode/decode. (2) A `tests/perf` harness that launches the built app against the reference
+ corpus and asserts: RSS in the three states, cold-start-to-interactive, command latency p95, canvas FPS over
+ a scripted 60 s pan/zoom — sampling `/proc/<pid>/status` (Linux), `task_info` (macOS), `GetProcessMemoryInfo`
+-(Windows) rather than a new dependency. (3) `#[ignore]`-tagged adversarial and crash suites run nightly and on
+-release candidates. Median-of-5 with a fixed 10 % regression tolerance per metric; a red harness blocks merge,
++(Windows) rather than a new dependency. (3) A two-tier split for the adversarial and crash suites, because §Workflow's CI list is explicitly
++"all blocking" (... -> vault round-trip and crash-recovery test -> index-destruction rebuild test): a
++**blocking** subset runs in the merge gate (`tests/security/escape_suite.rs`, `board_durability --trials 20`,
++the index-destruction rebuild), and the exhaustive sweep (200 trials, `cargo-fuzz` 120 s) runs nightly and on
++release candidates as `#[ignore]`-tagged, additive coverage. Median-of-5 with a fixed 10 % regression tolerance per metric; a red harness blocks merge,
+ per §III.1. The harness refuses to run with an unnamed reference machine (plan's inherited TODO).
+ 
+ **Rationale**: Micro-benchmarks alone do not prove a 350 MB idle budget, and a single number per metric is too
+@@ -263,16 +278,49 @@
+ v0.1: they are English-centric and do not reflect a personal vault with Portuguese content; revisit as a
+ secondary signal when the corpus is larger.
+ 
+-## Owner Decisions (blocking for `/speckit-tasks`)
+-
+-1. **Reference machine + budget sign-off** — name the exact CPU/GPU/RAM/SSD and OS build the perf gates run
++## D14 — Rulings applied to the `/speckit-analyze` MEDIUM/LOW batch
++
++**Decision**: these findings were closed by ruling rather than escalated, because each has one technically
++defensible answer and none of them changes a constitutional obligation. Anything that *would* touch one is listed
++at the end and goes to the owner instead.
++
++| Ruling | Finding | What was decided | Why |
++| --- | --- | --- | --- |
++| R-1 | C1, C3 | `crates/sandland-cli` is the single operator binary; `apps/desktop` keeps an in-process alias flag and never shells out | The either/or left quickstart §1's gate with no owner; the constitution's no-duplicate-logic rule decides the case |
++| R-2 | F4 | Canonical grammar at `crates/sandland-infer/assets/`, spec copy becomes a CI byte-checked mirror | A shipped binary must not read `specs/`, and a contract must stay reviewable where it is |
++| R-3 | F8, F9 | `grammar_sha` = full 64-hex in `audit_events`, 12-hex prefix in frontmatter, both labelled | Provenance needs collision resistance; frontmatter needs to be eyeballable |
++| R-4 | E2 | v0.1 asserts *absence* of analytics via the denylist + egress test; the consent UI is deferred and named in Out of Scope | §II.2's consent rule presumes an egress-capable build; building a consent dialog for a feature that cannot phone home is speculative UI (§VIII YAGNI) |
++| R-5 | D3 | `vault-fsck --gc` refuses to report collectable orphans unless `index_state.status = 'ready'` | Refcounts are derived, so a warming index reports zero references and live assets look collectable |
++| R-6 | E3, E5 | `ENOSPC` fault injection lands in T048; non-Latin/RTL rendering check lands in T059 | Both were spec edge cases with implementation but no assertion |
++| R-7 | B2, A1 | 10,000 nodes gets numbers (≥ 30 FPS p50, ≤ 100 ms input) but stays measured-not-gating in v0.1; SC-001/SC-002 are separated by scope rather than merged | A blocking gate needs named hardware (OD-1); merging SC ids would renumber a list that tasks, the plan and the constitution already cite |
++| R-8 | D4 | Vendored `llama.cpp` rev + digest move into a parseable `toml` block in ADR-0005, asserted in CI | §VIII.5 asks for documented provenance; provenance a machine can check is provenance that holds |
++| R-10 | found while verifying the fix, not by the report | `PRAGMA foreign_keys = ON` becomes a named per-connection invariant of `store.rs` | Executing data-model §3's DDL with the pragma off left orphan `item_docs` rows and their postings behind: the cascade edges are not automatic in SQLite, and a rebuild would have masked the leak |
++| R-9 | F3, F5, F6, F7 | Plan structure gains `sandland-{cli,fixtures,perf}` and the real crate count; phase count, Complexity-row count and command count corrected, with the command count now CI-asserted | Each was a number a reviewer would have trusted |
++
++**Escalated, not decided here**: B1 (the owner-held `TODO(SHA256_CHECKSUMS)`, `TODO(BENCHMARK_REFERENCE_MACHINE)`
++etc. stay open on purpose — quickstart §9 now names the commands that fail closed while they do) and the D1
++*alternative* (keeping crash/security suites nightly-only would need an amendment to §Workflow with a `WAIVED`
++line and an expiry; the applied fix instead makes a fast subset blocking, which needs no amendment). See OD-8.
++
++## Owner Decisions (blocking at the gates that consume them)
++
++1. **OD-1 — Reference machine + budget sign-off** — name the exact CPU/GPU/RAM/SSD and OS build the perf gates run
+    on, or accept a documented tolerance band. Blocks D9, D12, and every §III gate.
+-2. **Windows posture for v0.1** — confirm plan V1 (Windows ships vault/index/canvas, agent features disabled)
++2. **OD-2 — Windows posture for v0.1** — confirm plan V1 (Windows ships vault/index/canvas, agent features disabled)
+    or descope Windows from the v0.1 bundle entirely.
+-3. **Embedding runtime deviation** — approve or reject ADR-0001 (D2/V3); rejection restores ONNX and requires
++3. **OD-3 — Embedding runtime deviation** — approve or reject ADR-0001 (D2/V3); rejection restores ONNX and requires
+    a written §III exception.
+-4. **Model digests and footprints** — supply the full 64-hex SHA-256 values for the shipped pair
++4. **OD-4 — Model digests and footprints** — supply the full 64-hex SHA-256 values for the shipped pair
+    (`TODO(SHA256_CHECKSUMS)`) plus classifier/whisper footprints (`TODO(MODEL_FOOTPRINTS)`), so
+    `models.lock.toml` and the 2.8 GB inference ceiling become verifiable.
+-5. **Corpus and board sizes for acceptance** — confirm the 5,000-item / 1,000-node reference (and
++5. **OD-5 — Corpus and board sizes for acceptance** — confirm the 5,000-item / 1,000-node reference (and
+    50,000 / 10,000 ceilings) used by SC-003, SC-007, SC-011.
++6. **OD-6 — 10,000-node tier enforcement** — R-7 proposes measured-and-reported for v0.1 (≥ 30 FPS p50, ≤ 100 ms input
++   latency) and blocking from v0.2. Say so if you want it blocking now, which means committing the gate to named
++   hardware.
++7. **OD-7 — SC-001 / SC-002 boundary** — R-7 keeps both criteria and splits their scope instead of merging them;
++   merging would renumber a list cited by tasks, the plan and the constitution's own gate.
++8. **OD-8 — exhaustive suites outside the merge gate** — D1 was resolved by making a fast subset blocking, because
++   §Workflow says "all blocking". If you would rather keep crash/security nightly-only in v0.1, that is an
++   amendment to §Workflow (MINOR, with a `WAIVED` entry and an expiry date), not something remediation may do
++   quietly.
+diff --git a/specs/001-local-first-core/data-model.md b/specs/001-local-first-core/data-model.md
+--- a/specs/001-local-first-core/data-model.md
++++ b/specs/001-local-first-core/data-model.md
+@@ -11,7 +11,7 @@
+ ```text
+ <vault>/
+ ├── .system/                        # derived + durable runtime state; deletable except audit_log.db
+-│   ├── index.db                    # SQLite: items, items_fts (external content), vec_items, terms  [DISPOSABLE]
++│   ├── index.db                    # SQLite: items, item_docs, items_fts, vec_items, terms       [DISPOSABLE]
+ │   ├── audit_log.db                # SQLite: reversible event history                                [DURABLE]
+ │   ├── taxonomy_cache.json         # term vector cache for cosine merge/alias                        [DISPOSABLE]
+ │   ├── sandbox/                    # generated per-task profiles (Seatbelt .sb), mode 0600           [EPHEMERAL]
+@@ -73,7 +73,7 @@
+ classification:
+   stage: llm_gbnf                     # llm_gbnf | llm_retry_temp0 | heuristic | manual
+   model: qwen2.5-1.5b-instruct-q4_k_m
+-  grammar_sha: sha256:<12hex>
++  grammar_sha: sha256:<first 12 hex>   # labelled prefix; the full 64-hex digest lives in audit_events.grammar_sha
+   attempts: 1
+   duration_ms: 1834
+   error: null
+@@ -106,8 +106,10 @@
+ 
+ `assets/<sha256>` holds bytes exactly as captured; the hash is computed streaming at 1 MiB blocks (same shape
+ as the RFC's integrity reader). Dedup is by digest, refcounting is **derived** (counted from item frontmatter
+-at reindex) and never stored in the vault. GC is a manual, opt-in `vault_fsck` that lists orphans; deleting is
+-a user action logged to the audit log (§V.5, and §I's rule that no automated path may destroy content).
++at reindex) and never stored in the vault. GC is a manual, opt-in `vault_fsck --gc` that lists orphans and
++**refuses to report anything as collectable while `index_state.status ≠ 'ready'`** — refcounts are derived, so a
++warming or rebuilding index reports zero references and would present live, referenced assets as garbage; deleting
++is in all cases a user action logged to the audit log (§V.5, and §I's rule that no automated path may destroy content).
+ 
+ ## 2. Entity Model (logical)
+ 
+@@ -129,7 +131,8 @@
+ | Task | in-memory (transient) | `task_id` | reindex / classify_batch / model_load; progress via events |
+ 
+ Relationships are expressed by ids inside vault files, never by foreign keys in the index; SQLite FKs exist
+-only *within* `index.db` for internal consistency (`items.id → vec_items.item_id`, `items.rid → items_fts`),
++only *within* `index.db` for internal consistency (`items.id → vec_items.item_id`, `items.rid →
++   item_docs.rid` with `ON DELETE CASCADE`, and `item_docs` → `items_fts` by trigger),
+ because an index may be rebuilt but content must never depend on it (§I.2).
+ 
+ ## 3. `index.db` Topology (disposable, no migrations)
+@@ -140,7 +143,7 @@
+ PRAGMA busy_timeout = 5000;
+ PRAGMA foreign_keys = ON;
+ 
+--- Single integer anchor so FTS5 external-content can mirror rows without duplicating text.
++-- Single integer anchor: `rid` is the join key shared by `items`, `item_docs` and `items_fts`.
+ CREATE TABLE items (
+   rid           INTEGER PRIMARY KEY AUTOINCREMENT,
+   id            TEXT    NOT NULL UNIQUE,
+@@ -160,16 +163,35 @@
+ CREATE INDEX idx_items_review   ON items(needs_manual_review) WHERE needs_manual_review = 1;
+ CREATE INDEX idx_items_category ON items(category_term);
+ 
+--- Lexical leg. External content: text is read from a VIEW, so the FTS index stores no second copy.
+-CREATE VIEW items_searchable AS SELECT rid AS id, title,
+-       -- body text is not stored in the vault DB; the resolver supplies it on demand
+-       '' AS content
+-FROM items;
++-- Lexical leg. FTS5 external content resolves columns BY NAME against the content= table,
++-- with no aliasing, so the source must physically hold the text in a column literally named
++-- `content`. (The form previously here was a view whose content column was the constant '' --
++-- SQLite accepts the DDL and then indexes nothing: verified against 3.40, a body-term MATCH
++-- returned 0 rows while the title term returned 1. See /speckit-analyze F1.)
++CREATE TABLE item_docs (
++  rid     INTEGER PRIMARY KEY REFERENCES items(rid) ON DELETE CASCADE,
++  title   TEXT NOT NULL,
++  content TEXT NOT NULL      -- index-side copy of the vault body: disposable, never authoritative (§I.2)
++);
+ CREATE VIRTUAL TABLE items_fts USING fts5(
+   title, content,
+-  content='items_searchable', content_rowid='id',
++  content='item_docs', content_rowid='rid',
+   tokenize="unicode61 remove_diacritics 1"
+ );
++-- Postings are written ONLY by these three triggers, inside the single writer's transaction.
++-- `INSERT INTO items_fts(items_fts) VALUES('rebuild')` is the wipe/rebuild path (D7).
++CREATE TRIGGER item_docs_ai AFTER INSERT ON item_docs BEGIN
++  INSERT INTO items_fts(rowid, title, content) VALUES (new.rid, new.title, new.content);
++END;
++CREATE TRIGGER item_docs_ad AFTER DELETE ON item_docs BEGIN
++  INSERT INTO items_fts(items_fts, rowid, title, content)
++    VALUES ('delete', old.rid, old.title, old.content);
++END;
++CREATE TRIGGER item_docs_au AFTER UPDATE ON item_docs BEGIN
++  INSERT INTO items_fts(items_fts, rowid, title, content)
++    VALUES ('delete', old.rid, old.title, old.content);
++  INSERT INTO items_fts(rowid, title, content) VALUES (new.rid, new.title, new.content);
++END;
+ 
+ -- Semantic leg (sqlite-vec). Dim fixed by the embedding model; mismatch ⇒ rebuild, not migrate.
+ CREATE VIRTUAL TABLE vec_items USING vec0(
+@@ -228,7 +250,7 @@
+ 
+ **Hybrid query** is the RFC §4 RRF statement (k = 60, `distance < 0.85`, 100-result legs, single optimized
+ statement, `LEFT JOIN` on both legs, `ORDER BY rrf_score DESC LIMIT :limit`), wrapped so `items_fts` content
+-resolution reads through `items_searchable`. Tuning any constant requires the golden-query eval (D13).
++resolution reads through `item_docs` (kept current by the triggers above). Tuning any constant requires the golden-query eval (D13).
+ 
+ ## 4. `audit_log.db` Topology (durable, forward-only migrations)
+ 
+@@ -284,6 +306,8 @@
+    metadata append leaves it unchanged (D6); violation = `IntegrityMismatch` and the item is quarantined in
+    the review queue.
+ 2. No index row may exist without a resolvable `vault_path`; reindex deletes orphans. Never the reverse.
++   `item_docs` never outlives its `items` row (cascade), and a term present **only in the body** MUST be
++   retrievable through `items_fts MATCH` after a cold rebuild -- the F1 regression guard.
+ 3. `assets/<digest>` content hash equals its filename, verified on first read per session (§V.5).
+ 4. `board.canvas.mpk` node count equals `cells/*.md` count plus link-only proxies; a mismatch resolves toward
+    the `.mpk` and rewrites the mirror (D8).
+@@ -346,7 +370,7 @@
+ | Artifact | Estimate | Budget note |
+ | --- | --- | --- |
+ | `items` rows | 5,000 (+ cells) | ~1.5 MB |
+-| `items_fts` | 150 MB of text indexed, external content | ~55 MB index → within reindex-time, not RAM |
++| `item_docs` + `items_fts` | 150 MB of body text copied into the **disposable** index, plus ~55 MB of postings | RAM cost bounded to reindex time, never counted against the 350 MB idle budget (a derived copy outside the vault is permitted by §I.2) |
+ | `vec_items` | 5,000 × 384 × 4 B | ~7.3 MB + row overhead |
+ | `board_nodes` (1,000-node board) | 1,000 rows + edges | ~180 KB |
+ | `board.canvas.mpk` | per node ≈ 96 B packed | ~96 KB, ≤ 350 ms cadence |
+diff --git a/specs/001-local-first-core/tasks.md b/specs/001-local-first-core/tasks.md
+--- a/specs/001-local-first-core/tasks.md
++++ b/specs/001-local-first-core/tasks.md
+@@ -29,15 +29,15 @@
+ - [ ] T003 [P] Resolve OD-3: approve or reject `docs/adr/0001-embeddings-via-llama-cpp.md`; rejection restores ONNX and requires a written §III exception in the same ADR
+ - [ ] T004 Resolve OD-4: fill `crates/sandland-models/models.lock.toml` with full 64-lowercase-hex SHA-256 per entry plus `bytes` and `rss_estimate` for embeddings + classifier (closes constitution `TODO(SHA256_CHECKSUMS)`; the 2.8 GB ceiling stays open until the copilot/whisper footprints arrive)
+ - [ ] T005 [P] Resolve OD-5: confirm or amend the acceptance corpus in `tests/fixtures/MANIFEST.md` (5,000 items ≈ 150 MB Markdown + 2,000 assets; 1,000-node reference board; 50,000 / 10,000 ceilings)
+-- [ ] T006 Create `Cargo.toml` workspace root with members `crates/sandland-{proto,vault,index,taxonomy,infer,ingest,canvas,audit,sandbox,models,fixtures}` and `apps/desktop/src-tauri`, plus `[workspace.lints.rust] unsafe_code = "warn"` and `[workspace.lints.clippy] all = { level = "deny" }`
++- [ ] T006 Create `Cargo.toml` workspace root with members `crates/sandland-{proto,vault,index,taxonomy,infer,ingest,canvas,audit,sandbox,models}` (libraries) + `crates/sandland-{fixtures,cli,perf}` (binaries) and `apps/desktop/src-tauri`, plus `[workspace.lints.rust] unsafe_code = "warn"` and `[workspace.lints.clippy] all = { level = "deny" }`
+ - [ ] T007 Pin the toolchain in `rust-toolchain.toml`: stable ≥ 1.85 with components `["miri", "llvm-tools"]` and targets for all five release triples
+-- [ ] T008 Write `deny.toml`: allow `MIT | Apache-2.0 | BSD-2-Clause | BSD-3-Clause | ISC`, `yank = "deny"`, `unlicensed = "deny"`, copyleft `deny`, sources limited to crates.io + the pinned `llama.cpp` git rev; no network fetch of models at build time
++- [ ] T008 Write `deny.toml`: allow `MIT | Apache-2.0 | BSD-2-Clause | BSD-3-Clause | ISC`, `yank = "deny"`, `unlicensed = "deny"`, copyleft `deny`, sources limited to crates.io + the pinned `llama.cpp` git rev; no network fetch of models at build time. The `[bans]` section additionally denies telemetry, crash-reporting and analytics crates by name (`sentry*`, `posthog*`, `segment*`, `matomo*`, `amplitude*`, `mixpanel*`) with no `skip` entries, and `./scripts/check-no-telemetry.sh` fails the build if any transitive dependency pulls one in: §II.2's "no telemetry by default" has no other machine check in v0.1, and FR-025 now states plainly that the consent surface is not exercised by this release
+ - [ ] T009 Configure `.cargo/config.toml` with CI `rustflags = ["-D", "warnings"]` and per-target linker notes for `aarch64-unknown-linux-gnu` and `x86_64-pc-windows-msvc`
+ - [ ] T010 Scaffold `apps/desktop/src-tauri/`: `tauri.conf.json` (CSP `default-src 'self'`, **no** fs/shell plugin), `capabilities/default.json` (vault commands on main window only), `src/main.rs`, `src/lib.rs`, `build.rs`
+ - [ ] T011 [P] Scaffold `apps/desktop/web/`: `package.json`, `tsconfig.json` with `strict: true`, `vite.config.ts`, `index.html`, `src/main.ts`
+ - [ ] T012 [P] Add `.gitignore` entries `target/`, `node_modules/`, `dist/`, `apps/desktop/web/src/ipc/bindings.ts.bak`, `*.tmp.*`, `tests/fixtures/corpus-5k-vault/` and write `docs/dev/architecture.md` linking the spec artifacts
+ - [ ] T013 [P] File `docs/adr/0003-index-is-disposable-no-migrations.md` (research D7: version mismatch ⇒ delete + rebuild for `index.db`, forward-only migrations for `audit_log.db`)
+-- [ ] T014 [P] File `docs/adr/0005-crate-admission.md` with one annex per admitted crate from research D10 (license, purpose, maintenance, `ort` explicitly not admitted, vendored `llama.cpp` rev + SHA-256)
++- [ ] T014 [P] File `docs/adr/0005-crate-admission.md` with one annex per admitted crate from research D10 (license, purpose, maintenance, `ort` explicitly not admitted; vendored `llama.cpp` rev + SHA-256 recorded in a fenced ```toml block inside the ADR — not prose — so CI can parse it (asserted by T044)
+ - [ ] T015 File `docs/adr/0002-descriptor-bound-path-io.md` (research D4) recording that the RFC §4 `secure_read_to_string` snippet is superseded, with the symlink-swap PoC as evidence
+ 
+ **Checkpoint**: workspace builds empty (`cargo check --workspace`), all five owner decisions recorded, `deny check licenses` green.
+@@ -52,18 +52,18 @@
+ **⚠️ CRITICAL**: No story work may start before this phase is complete.
+ 
+ - [ ] T016 Implement `crates/sandland-proto/src/ids.rs`: ULID-style ids (Crockford base32, monotonic per process, lowercase, `[a-z0-9]{26}`) for `ItemId | CellId | WorkspaceId | TaskId | NodeId`, plus `new_vault_filename(ts, slug)` enforcing "`slug` ≤ 48 chars" and the `<YYYYMMDDTHHMMSSZ>-<slug>.md` pattern
+-- [ ] T017 Implement `crates/sandland-proto/src/error.rs`: the 16-variant `IpcError` exactly as declared in `contracts/tauri-commands.md`, with stable snake_case `code` strings and `trace_id` on `Internal`
+-- [ ] T018 Implement `crates/sandland-proto/src/commands.rs`: request/response DTOs for all ~35 commands with `serde` + `specta` annotations; assert no DTO (except `vault_open.root` and `model_provide.local_dir_label`) has a path-typed field
++- [ ] T017 Implement `crates/sandland-proto/src/error.rs`: the 17-variant `IpcError` exactly as declared in `contracts/tauri-commands.md`, with stable snake_case `code` strings and `trace_id` on `Internal`
++- [ ] T018 Implement `crates/sandland-proto/src/commands.rs`: request/response DTOs for all 33 commands (the number of command rows in `contracts/tauri-commands.md`; T044 asserts the two agree) with `serde` + `specta` annotations; assert no DTO (except `vault_open.root` and `model_provide.local_dir_label`) has a path-typed field
+ - [ ] T019 [P] Implement `crates/sandland-proto/src/events.rs`: the 15 event payloads from `contracts/tauri-events.md`, each with `seq: u64` and `workspace_id: Option<WorkspaceId>` where scoped
+ - [ ] T020 [P] Implement `crates/sandland-proto/src/budgets.rs`: single const table — `IDLE_RSS_MB=350`, `INDEXING_RSS_MB=650`, `INFERENCE_RSS_MB=2_800`, `MODEL_UNLOAD_IDLE=300s`, `COLD_START_NVME_MS=2_200`, `COLD_START_HDD_MS=4_500`, `COMMAND_P95_MS=150`, `CAPTURE_P95_MS=1_000`, `CANVAS_FPS=60`, `LOSS_WINDOW_MS=500`, `MPK_COALESCE_MS=350`, `MIRROR_IDLE_MS=2_000`, `WATCH_DEBOUNCE_MS=75`, `WRITER_BATCH=200`, `RRF_K=60`, `VEC_MAX_DISTANCE=0.85`, `LEG_LIMIT=100`, `TYPED_EVENT_RING=256`, `IDS_MAX=500`, `FILES_CAPTURE_MAX=20`
+ - [ ] T021 Implement `crates/sandland-vault/src/path_guard.rs`: `openat2` with `RESOLVE_IN_ROOT` (rooted at the workspace dirfd) and `RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS`, `O_NOFOLLOW` on the final component, `fstat` `st_dev`/`st_ino` identity verification, and the manual component-walking fallback for kernels < 5.6; return `SandboxEscapeAttempt { attempted, boundary }` on any escape
+ - [ ] T022 Implement `crates/sandland-vault/src/atomic.rs`: temp-in-same-directory → `fsync` → `rename` → parent-dir `fsync`; discard temp and leave the original untouched on `ENOSPC`; expose `WriteReceipt { post_hash }` for watcher self-suppression (research D11)
+ - [ ] T023 Implement `crates/sandland-vault/src/frontmatter.rs`: flat-YAML codec with required `schema: sandland.<kind>/1` tag, append-only key insertion that preserves existing key order, and `IntegrityMismatch` when the body hash changes across a metadata append
+ - [ ] T024 [P] Implement `crates/sandland-vault/src/cas.rs`: streaming SHA-256 in 1 MiB blocks, write-once `assets/<64-hex>`, dedup by digest, refcount derived (never persisted in the vault)
+-- [ ] T025 Implement `crates/sandland-vault/src/vault.rs`: open/validate root (must be a real directory, not a symlink; record `st_dev`), detect case-insensitive and network-backed volumes ⇒ `VaultUnsafeFilesystem { reason }`, and reject unknown-major `schema` items by opening them read-only with an audit event
++- [ ] T025 Implement `crates/sandland-vault/src/vault.rs`: open/validate root (must be a real directory, not a symlink; record `st_dev`), detect case-insensitive and network-backed volumes ⇒ `VaultUnsafeFilesystem { reason }`, reject unknown-major `schema` items by opening them read-only with an audit event, and **take the per-vault lease** on `<vault>/.system/vault.lock` (`flock` / `LockFileEx`, descriptor held for the session, payload = pid + start time) so a second opener gets `VaultInUse { holder }` and drops to read-only instead of racing writes; two *different* vaults stay fully concurrent (FR-031)
+ - [ ] T026 Implement `crates/sandland-vault/src/watcher.rs`: `notify` with 75 ms per-path debounce, `(st_dev, st_ino, mtime, content_hash)` compare-then-apply, suppression via `WriteReceipt`, bounded rescan at ≤ 500 paths/s, and index-only reconciliation (never rewrites user content)
+-- [ ] T027 Implement `crates/sandland-index/src/schema.rs`: the full `index.db` DDL from data-model §3 verbatim, including `items.rid INTEGER PRIMARY KEY AUTOINCREMENT`, `body_hash`/`fm_hash` NOT NULL, `item_type CHECK (item_type IN ('ingest_note','ingest_web','ingest_media','cell'))`, external-content `items_fts` over the `items_searchable` view with `tokenize="unicode61 remove_diacritics 1"`, `vec_items ... embedding FLOAT[384]`, `terms/term_aliases` reasons `CHECK (reason IN ('levenshtein','cosine','manual'))`, and `board_edges.kind CHECK (kind IN ('link','flow','group'))`; snapshot it with `insta`
+-- [ ] T028 Implement `crates/sandland-index/src/store.rs`: `journal_mode=WAL`, `synchronous=NORMAL`, `busy_timeout=5000`, `foreign_keys=ON`, page cache capped at 8 MB; pack `PRAGMA user_version` from schema version + embedding-model id + grammar sha, and on mismatch or `SQLITE_CORRUPT`/`NOTADB` **delete the file and rebuild** (no migration code at all)
++- [ ] T027 Implement `crates/sandland-index/src/schema.rs`: the full `index.db` DDL from data-model §3 verbatim, including `items.rid INTEGER PRIMARY KEY AUTOINCREMENT`, `body_hash`/`fm_hash` NOT NULL, `item_type CHECK (item_type IN ('ingest_note','ingest_web','ingest_media','cell'))`, external-content `items_fts` fed from `item_docs` (not a view) with `tokenize="unicode61 remove_diacritics 1"`, `vec_items ... embedding FLOAT[384]`, `terms/term_aliases` reasons `CHECK (reason IN ('levenshtein','cosine','manual'))`, and `board_edges.kind CHECK (kind IN ('link','flow','group'))`; it must also declare `item_docs(rid, title, content)` with `REFERENCES items(rid) ON DELETE CASCADE`, `items_fts` over `content='item_docs'` / `content_rowid='rid'`, and the three `item_docs_ai/ad/au` triggers; add the F1 guard `crates/sandland-index/tests/fts_source.rs` asserting a **body-only** term (in `content`, absent from `title`) is retrievable after a cold rebuild, and that a `content='items_searchable'`-style view source does NOT pass it; snapshot the DDL with `insta`
++- [ ] T028 Implement `crates/sandland-index/src/store.rs`: `journal_mode=WAL`, `synchronous=NORMAL`, `busy_timeout=5000`, `foreign_keys=ON` **on every connection the store opens, not only the first** (without it the `ON DELETE CASCADE` edges to `item_docs`, `vec_items` and `asset_refs` are inert and the projection leaks rows a rebuild would mask), page cache capped at 8 MB; pack `PRAGMA user_version` from schema version + embedding-model id + grammar sha, and on mismatch or `SQLITE_CORRUPT`/`NOTADB` **delete the file and rebuild** (no migration code at all)
+ - [ ] T029 Implement `crates/sandland-index/src/writer.rs`: single-writer task owning every mutation, mpsc intake, transactions of ≤ 200 mutations, and a `WriterToken` type so no other task can compile a write (invariant 9)
+ - [ ] T030 Implement `crates/sandland-index/src/search.rs`: the single RRF statement (k = 60, `distance < 0.85`, both legs `LIMIT 100`, `COALESCE` ranks 999, `ORDER BY rrf_score DESC LIMIT :limit`) plus `search_explain` returning `{ fts_rank, vec_rank, score }`
+ - [ ] T031 Implement `crates/sandland-index/src/rebuild.rs`: full-scan reindex resumable by `body_hash`, `index_state` keys `status/last_full_rebuild_at/corpus_item_count/writer_epoch/embedding_model/grammar_sha`, and `status='warming'` while running
+@@ -79,8 +79,8 @@
+ - [ ] T041 Create `tests/contract/fixtures/` golden JSON for every command (success + each `IpcError` variant) and the TS compile-against-fixtures job in `tests/contract/mod.rs`
+ - [ ] T042 Create `tests/fixtures/queries.toml` eval harness in `crates/sandland-index/tests/eval.rs`: rank-biased precision ≥ 0.85 over the 60 golden queries, failing CI if `RRF_K`, `VEC_MAX_DISTANCE` or leg size moves without the metric moving up
+ - [ ] T043 Write `tests/integration/invariants.rs` covering data-model §5 rules 1–10 (body-hash immutability, no orphan index rows, asset digest match, mpk/cell count parity, term resolution, review-flag iff stage 4, undo byte identity, `FLOAT[384]` dimension, writer-token, audit-before-publish)
+-- [ ] T044 Add `.github/workflows/ci.yml`: fmt → clippy `-D warnings` → `cargo deny check` → `nextest` → `llvm-cov --fail-under-lines 80` with a 90 override for `-p sandland-vault -p sandland-sandbox -p sandland-audit -p sandland-taxonomy` → `miri` on `sandland-infer` → 5-target release build matrix; perf stage gated on T001's `ref_machine.toml`
+-- [ ] T045 Add `.github/workflows/nightly.yml` running the `#[ignore]`-tagged `tests/security/`, `tests/crash/` suites and `cargo-fuzz` for 120 s
++- [ ] T044 Add `.github/workflows/ci.yml` following the constitution's **blocking** order exactly: fmt → clippy `-D warnings` → `cargo deny check` → `nextest` (unit + property + contract) → `llvm-cov --fail-under-lines 80` with the 90 override for `-p sandland-vault -p sandland-sandbox -p sandland-audit -p sandland-taxonomy -p sandland-models` (§VIII.2 names checksum verification, which lives in `sandland-models/src/integrity.rs` — T037) → `miri` on `sandland-infer` → 5-target release build matrix → performance harness vs §III budgets (gated on T001's `ref_machine.toml`; the 10,000-node tier is measured and reported, not gating, until OD-1 and OD-6 settle the machine) → **vault round-trip + crash-recovery fast subset** (`-p sandland-canvas --test board_durability -- --trials 20`, with the `ENOSPC` and partial-write assertions) → **index-destruction rebuild** (T061 export diff, in the merge gate, not nightly) → **vendored-provenance assertion** (the `llama.cpp` rev/digest checked out under `third_party/` equals the parsed `toml` block in `docs/adr/0005-crate-admission.md`, R-8) → **contract-count assertion** (T018's stated command count equals the command rows in `contracts/tauri-commands.md`, R-9) → **grammar-mirror assertion** (`crates/sandland-infer/assets/taxonomy-gbnf.gbnf` is byte-identical to its copy under `contracts/`, R-2)
++- [ ] T045 Add `.github/workflows/nightly.yml` running the **exhaustive** variants *additively on top of* T044's blocking subsets — never as their replacement, per §Workflow's "all blocking": `board_durability --trials 200`, the full `tests/security/` corpus (cross-workspace + egress sweeps), `cargo-fuzz` for 120 s, and `miri` across the whole `sandland-infer` tree; a nightly red opens an issue but does not unblock a merge T044 passed
+ 
+ **Checkpoint**: `cargo nextest run --workspace` green with T043 invariants passing against a stub vault; a
+ rebuild-from-nothing works; the sandbox probe decides correctly on this host.
+@@ -98,9 +98,9 @@
+ 
+ ### Tests for User Story 1 (write first, expect RED) ⚠️
+ 
+-- [ ] T046 [P] [US1] Contract tests for `ingest_capture_text`, `ingest_capture_files`, `ingest_list`, `search_hybrid`, `vault_reindex` in `tests/contract/ingest.rs`, asserting idempotent `client_op_id` replay and `Conflict { expected_body_hash, found_body_hash }` on stale writes
+-- [ ] T047 [P] [US1] Integration test in `tests/integration/us1_capture_retrieve.rs`: capture → visible in ≤ 1 s p95 for a 5 MB item → search p95 < 150 ms on 5,000 items → export diff identical after full index wipe (FR-001/002/006, SC-001/SC-002/SC-003)
+-- [ ] T048 [P] [US1] Property tests in `crates/sandland-vault/tests/frontmatter_props.rs`: metadata appends never alter body bytes; unknown-major `schema` yields read-only + audit event; NFC normalization and the `[a-z0-9_-]{1,64}` segment rule reject `..`, leading `.`, NUL and over-long slugs
++- [ ] T046 [P] [US1] Contract tests for `ingest_capture_text`, `ingest_capture_files`, `ingest_list`, `search_hybrid`, `vault_reindex` in `tests/contract/ingest.rs`, asserting idempotent `client_op_id` replay, `Conflict { expected_body_hash, found_body_hash }` on stale writes, and the second-instance case (opening the same fixture vault twice ⇒ `VaultInUse`, writes rejected, reads served) (FR-031)
++- [ ] T047 [P] [US1] Integration test in `tests/integration/us1_capture_retrieve.rs`: capture → visible in ≤ 1 s p95 for a 5 MB item → search p95 < 150 ms on 5,000 items → export diff identical after full index wipe; include a **body-only** query and a Portuguese-accented one (`atenção` matching `Atenção`) so the lexical leg and the NFC path cannot regress silently (FR-001/FR-002/FR-006/FR-029, SC-001/SC-002/SC-003)
++- [ ] T048 [P] [US1] Property tests in `crates/sandland-vault/tests/frontmatter_props.rs`: metadata appends never alter body bytes; unknown-major `schema` yields read-only + audit event; NFC normalization and the `[a-z0-9_-]{1,64}` segment rule reject `..`, leading `.`, NUL and over-long slugs; and `crates/sandland-vault/tests/atomic_enospc.rs` implements the `ENOSPC`/quota-failure injection T044's blocking list already promises — failure injected between temp write and rename, asserting the temp is discarded, the original stays byte-identical, and the error is reported rather than swallowed (FR-015, spec Edge Cases)
+ - [ ] T049 [P] [US1] Asset tests in `crates/sandland-vault/tests/cas.rs`: duplicate bytes ⇒ one object + two refs; zero-byte, invalid-UTF-8, and binary-with-text-extension files are stored and reported, never truncated or skipped; orphan detection never auto-deletes
+ 
+ ### Implementation for User Story 1
+@@ -108,15 +108,15 @@
+ - [ ] T050 [US1] Implement `crates/sandland-ingest/src/capture.rs`: write body to `ingest/<layer>/<generated-name>.md` **first**, then hand the row to the index writer; return `ItemSummary` + `task_id`; per-file results for batch capture (≤ 20 files), no all-or-nothing
+ - [ ] T051 [US1] Implement `crates/sandland-ingest/src/media.rs`: bytes → `assets/<sha256>` (write-once, verified) + `assets: []` frontmatter refs; media items get manual metadata only in v0.1
+ - [ ] T052 [US1] Implement `crates/sandland-vault/src/lib.rs` item API: `Item::{read, append_metadata}` with the D6 body-hash guard, `read_only: true` disabling edit affordances, and `IntegrityMismatch` quarantine into the review queue
+-- [ ] T053 [US1] Implement `crates/sandland-index/src/project.rs`: item upsert/delete projection, `items_fts` external-content sync through the `items_searchable` view, `board_nodes`/`board_edges` refresh, and orphan row deletion on rebuild
++- [ ] T053 [US1] Implement `crates/sandland-index/src/project.rs`: item upsert/delete projection, `items` + `item_docs` writes in a single transaction (the `item_docs_ai/ad/au` triggers are the only writers of `items_fts`; nothing else may touch it), `board_nodes`/`board_edges` refresh, and orphan row deletion on rebuild
+ - [ ] T054 [US1] Implement the vector leg in `crates/sandland-index/src/vectors.rs`: insert/replace `FLOAT[384]`, drop-and-requeue any row whose dimension ≠ 384, `embed_rebuild` task
+ - [ ] T055 [US1] Implement `crates/sandland-taxonomy/src/store.rs`: canonical term list + `term_aliases` + usage counts materialized from frontmatter, `taxonomy_cache.json` term vectors, and `terms_fts` prefix lookup for the Top-15/Top-20 candidate sets
+ - [ ] T056 [US1] Implement `apps/desktop/src-tauri/src/commands/{vault.rs,ingest.rs,search.rs}`: thin dispatchers only (no business logic), returning `Result<_, IpcError>`, `search_hybrid` carrying `partial: true` + `index_status` when warming
+ - [ ] T057 [US1] Implement event ordering rule 1 in `apps/desktop/src-tauri/src/emit.rs` tests: `item/upserted(reason="captured")` fires only after the atomic rename completes
+-- [ ] T058 [US1] Implement `apps/desktop/web/src/state/vaultStore.ts` from generated `bindings.ts`: list with cursor paging, `since`/`tag`/`layer` filters, and a "warming" banner when `index_status ≠ ready`
+-- [ ] T059 [US1] Implement `apps/desktop/web/src/views/IngestView.tsx`: paste + file-drop capture (bytes and display name only — no paths over IPC, D5), item list, item detail rendered from the vault file, and the `VaultUnsafeFilesystem` / `sandbox_status` warning strip (FR-028)
++- [ ] T058 [US1] Implement `apps/desktop/web/src/state/vaultStore.ts` from generated `bindings.ts`: list with cursor paging, `since`/`tag`/`layer` filters, a "warming" banner when `index_status ≠ ready`, and the read-only banner when the lease reports `VaultInUse` (FR-031)
++- [ ] T059 [US1] Implement `apps/desktop/web/src/views/IngestView.tsx`: paste + file-drop capture (bytes and display name only — no paths over IPC, D5), item list, item detail rendered from the vault file, the `VaultUnsafeFilesystem` / `sandbox_status` warning strip (FR-028), and a rendering check that accented and non-Latin material survives round-trip without mojibake (`atenção`, `变换器`, CJK plus emoji in one cell) with `dir` respected for RTL content (FR-029)
+ - [ ] T060 [US1] Implement `crates/sandland-vault/tests/watcher.rs` + the UI path for `watcher/conflict`: external edits update the index, a concurrent modification shows both hashes and never auto-resolves
+-- [ ] T061 [US1] Implement `crates/sandland-cli` (or `-- --reindex-then-exit` in the desktop crate) for the quickstart §1 index-destruction gate: export vault + top-50 results to JSON for before/after comparison
++- [ ] T061 [US1] Implement `crates/sandland-cli` as the **only** operator/validation binary: subcommands `vault-fsck [--gc]`, `export`, `reindex [--then-exit]`, each taking `--vault <path>` and calling `sandland-vault`/`-index` directly (no duplicated logic, no IPC, no network capability); it is what quickstart §1 runs to produce `before.json`/`after.json` for the index-destruction gate, and `--gc` refuses to report collectable orphans unless `index_state.status = 'ready'` (data-model §1.3). `apps/desktop` may expose `--reindex-then-exit` as a thin in-process alias, never a shell-out
+ 
+ **Checkpoint**: US1 alone is a shippable MVP — capture, search, rebuild-from-files, all outside the app.
+ Run quickstart §1 and §2 and stop to validate before continuing.
+@@ -178,7 +178,7 @@
+ ### Implementation for User Story 3
+ 
+ - [ ] T083 [US3] Implement `crates/sandland-infer/src/engine.rs`: `llama-cpp-2` in-process context pool (one engine for embeddings **and** the classifier per ADR-0001), batch decode, `unsafe` isolated to this crate, 15 s hard timeout per attempt, and no network capability
+-- [ ] T084 [US3] Implement `crates/sandland-infer/src/grammar.rs`: `include_str!("../../../../specs/001-local-first-core/contracts/taxonomy-gbnf.gbnf")` — move the file to `crates/sandland-infer/assets/taxonomy-gbnf.gbnf` and update the spec link — plus the `grammar_sha` digest (first 12 hex) threaded into every audit event and item frontmatter
++- [ ] T084 [US3] Implement `crates/sandland-infer/src/grammar.rs`, with the grammar's canonical copy at `crates/sandland-infer/assets/taxonomy-gbnf.gbnf` and embed it with `include_str!` from there; `specs/001-local-first-core/contracts/taxonomy-gbnf.gbnf` becomes a generated mirror that a CI step asserts byte-equality against, so the contract stays reviewable in place while the build never reaches into `specs/`. Compute `grammar_sha` as the full 64-hex SHA-256: `audit_events.grammar_sha` and every `grammar_violation` rejection carry the full digest, item frontmatter carries the first 12 hex labelled as a prefix (data-model §1.2)
+ - [ ] T085 [US3] Implement `crates/sandland-infer/src/scheduler.rs`: the sole model loader; `absent → verifying → ready → loading → loaded → unloading`; unload after 300 s of inference idleness using monotonic time only; `model/state` and `model/unloaded` events with RSS before/after
+ - [ ] T086 [US3] Implement `crates/sandland-infer/src/embed.rs`: 384-dim vectors for items and taxonomy terms feeding `vec_items` and `taxonomy_cache.json`
+ - [ ] T087 [US3] Implement `crates/sandland-ingest/src/classify.rs` stage 1: retrieve Top-15 categories + Top-20 active tags from the index as the candidate set, build the "reuse first, invent only for a grave conceptual gap" prompt, decode under the grammar, then hand to the post-processor
+@@ -329,3 +329,56 @@
+   **and** the plan, with an expiry date, per the constitution's exemption rule (§IV and §VIII are not waivable).
+ - Avoid: touching `contracts/taxonomy-gbnf.gbnf` without T078–T079 in the same change; adding a crate without
+   T014's annex; editing `bindings.ts` by hand.
++
++## Traceability (machine-derived, regenerates with the artifacts)
++
++`yes` = the task text cites the requirement id; `derived` = attributed from the files that task owns.
++24 of 43 rows are derived rather than cited (FR-003, FR-004, FR-005, FR-007, FR-008, FR-010, FR-011, FR-012, FR-013, FR-014, FR-016, FR-017, FR-019, FR-021, FR-022, FR-023, FR-024, FR-026, FR-027, FR-030, SC-006, SC-007, SC-010, SC-011). When you touch one of
++those tasks, put its `FR-###`/`SC-###` in the task text so the next pass marks it cited; T120 wires that
++rule into the PR template so the derived list shrinks on its own instead of this table rotting.
++
++| Req | Cited? | Tasks |
++| --- | --- | --- |
++| FR-001 | yes | T022, T047 |
++| FR-002 | yes | T028, T031, T047 |
++| FR-003 | derived | T050 |
++| FR-004 | derived | T023 |
++| FR-005 | derived | T024, T049 |
++| FR-006 | yes | T030, T047 |
++| FR-007 | derived | T087 |
++| FR-008 | derived | T084 |
++| FR-009 | yes | T080, T088 |
++| FR-010 | derived | T082, T090 |
++| FR-011 | derived | T091 |
++| FR-012 | derived | T032 |
++| FR-013 | derived | T033 |
++| FR-014 | derived | T066 |
++| FR-015 | yes | T048, T067 |
++| FR-016 | derived | T068 |
++| FR-017 | derived | T065 |
++| FR-018 | yes | T077 |
++| FR-019 | derived | T100, T101 |
++| FR-020 | yes | T035, T102, T104, T106 |
++| FR-021 | derived | T021 |
++| FR-022 | derived | T076, T103 |
++| FR-023 | derived | T037, T044, T081 |
++| FR-024 | derived | T085, T096 |
++| FR-025 | yes | T008, T105 |
++| FR-026 | derived | T110 |
++| FR-027 | derived | T110 |
++| FR-028 | yes | T025, T059 |
++| FR-029 | yes | T038, T042, T047, T059 |
++| FR-030 | derived | T026, T060 |
++| FR-031 | yes | T025, T046, T058 |
++| SC-001 | yes | T044, T047, T061 |
++| SC-002 | yes | T044, T047, T061 |
++| SC-003 | yes | T047 |
++| SC-004 | yes | T080 |
++| SC-005 | yes | T095 |
++| SC-006 | derived | T044, T045, T063 |
++| SC-007 | derived | T065 |
++| SC-008 | yes | T097, T103 |
++| SC-009 | yes | T037, T044, T081 |
++| SC-010 | derived | T110 |
++| SC-011 | derived | T110 |
++| SC-012 | yes | T105 |
+diff --git a/specs/001-local-first-core/contracts/tauri-commands.md b/specs/001-local-first-core/contracts/tauri-commands.md
+--- a/specs/001-local-first-core/contracts/tauri-commands.md
++++ b/specs/001-local-first-core/contracts/tauri-commands.md
+@@ -33,6 +33,7 @@
+     ModelMissing { role: String },
+     ModelCorrupted { role: String },
+     VaultUnsafeFilesystem { reason: String },         // case-insensitive / network mount (FR-028)
++    VaultInUse { holder: String },                    // vault open elsewhere → read-only (FR-031); holder = "pid@boot_id", identifies a holder without leaking a username
+     CapacityExceeded { kind: String, limit: u32 },
+     BudgetExceeded { metric: String, limit: u64, actual: u64 },
+     TaskCancelled { task_id: String },
+@@ -49,10 +50,10 @@
+ 
+ | Command | Args | Returns | Notes |
+ | --- | --- | --- | --- |
+-| `vault_open` | `{ root: string }` | `{ vault: VaultInfo }` | only place a path is accepted; validated in `path_guard`, warns `VaultUnsafeFilesystem` |
+-| `vault_info` | — | `{ root_label, item_count, index_status, audit_head: number, schema: string[] }` | `index_status: "ready" \| "warming" \| "stale" \| "missing"` |
++| `vault_open` | `{ root: string }` | `{ vault: VaultInfo }` | only place a path is accepted; validated in `path_guard`, warns `VaultUnsafeFilesystem`, takes the per-vault lease, and returns `VaultInUse` (read-only mode) when another instance holds it (FR-031) |
++| `vault_info` | — | `{ root_label, item_count, index_status, read_only: bool, audit_head: number, schema: string[] }` | `read_only` reflects the FR-031 lease | `index_status: "ready" \| "warming" \| "stale" \| "missing"` |
+ | `vault_reindex` | `{ mode: "auto" \| "full" }` | `{ task_id }` | "auto" = hash diff against index; `full` = wipe `.system/index.db` + rebuild (the §I.8 gate path) |
+-| `vault_fsck` | `{ include_orphans: bool }` | `{ task_id }` | read-only report; deletes are a separate explicit command in v0.2 |
++| `vault_fsck` | `{ include_orphans: bool }` | `{ task_id }` | read-only report; orphan listings are refused while `index_status ≠ ready` (data-model §1.3); deletes remain a separate explicit action |
+ | `workspace_create` | `{ title: string }` | `{ workspace_id }` | creates dir + `workspace.toml` + empty board; logs `workspace.create` |
+ | `workspace_list` | — | `{ workspaces: Workspace[] }` | |
+ | `workspace_activate` | `{ workspace_id }` | `{ workspace: Workspace, board: BoardSnapshot }` | switches the confinement boundary; aborts any running agent task first |
+diff --git a/specs/001-local-first-core/contracts/README.md b/specs/001-local-first-core/contracts/README.md
+--- a/specs/001-local-first-core/contracts/README.md
++++ b/specs/001-local-first-core/contracts/README.md
+@@ -10,7 +10,7 @@
+ | --- | --- | --- |
+ | [`tauri-commands.md`](./tauri-commands.md) | Command names, DTO shapes, `IpcError` codes, idempotency and conflict rules | Add/remove a command ⇒ update this file, `sandland-proto`, and the TS golden fixtures in the same commit |
+ | [`tauri-events.md`](./tauri-events.md) | Event names, payloads, `seq` ordering, coalescing and backpressure | New stream ⇒ define its snapshot-recovery path (a client that missed it must be able to catch up) |
+-| [`taxonomy-gbnf.gbnf`](./taxonomy-gbnf.gbnf) | The only accepted shape of classifier output, and the deterministic rules that follow it | Grammar edits require the proptest/fuzz trio in §VII.2 to be green, plus a `grammar_sha` bump (it is recorded in audit events) |
++| [`taxonomy-gbnf.gbnf`](./taxonomy-gbnf.gbnf) | The only accepted shape of classifier output, and the deterministic rules that follow it. **This is a mirror**: the canonical file is `crates/sandland-infer/assets/taxonomy-gbnf.gbnf`, and CI asserts the two are byte-identical (research D14 R-2), so the build never reads `specs/` and this copy never drifts | Grammar edits require the proptest/fuzz trio in §VII.2 to be green, plus a `grammar_sha` bump (it is recorded in audit events) |
+ | [`../data-model.md`](../data-model.md) | Vault layout, frontmatter schemas, index/audit DDL, state machines | Vault format change ⇒ migration + lossless-rebuild test (§I.5); index change ⇒ version bump only (rebuild, no migration) |
+ 
+ ## Generation and conformance
+diff --git a/specs/001-local-first-core/quickstart.md b/specs/001-local-first-core/quickstart.md
+--- a/specs/001-local-first-core/quickstart.md
++++ b/specs/001-local-first-core/quickstart.md
+@@ -43,7 +43,7 @@
+ PY
+ 
+ # 1b. Index destruction gate
+-cargo run -p sandland-cli -- vault-fsck --vault <v> --export > before.json
++cargo run -p sandland-cli -- vault-fsck --vault <v> --export > before.json   # the T061 binary
+ rm -rf <v>/.system/index.db <v>/.system/taxonomy_cache.json
+ cargo run -p sandland-desktop -- --vault <v> --reindex-then-exit > after.json
+ cmp <(jq -S . before.json) <(jq -S . after.json) && echo "OK: rebuild is lossless"
+@@ -105,7 +105,7 @@
+ 
+ ```bash
+ cargo nextest run -p sandland-vault --test atomic_write_crash          # temp+fsync+rename, disk-full, power cut
+-cargo run -p sandland-crash-trials -- --trials 200 --kill-signal SIGKILL   # typing-loss measurement
++cargo nextest run -p sandland-canvas --test board_durability -- --trials 200 --kill SIGKILL  # typing loss
+ cargo nextest run -p sandland-audit undo_batch_identity
+ ```
+ 
+@@ -157,6 +157,11 @@
+ 
+ ## 9. Known gaps a reviewer will hit
+ 
++Fail-closed by design while the owner-held decisions stay open — these are the commands that refuse, and they
++refuse rather than pass quietly: the `sandland-perf` harness and every §III budget assertion (until OD-1 names
++the reference machine), `model_verify`/`model_provide` integrity runs (until OD-4 supplies full digests), and the
++T044 performance stage, which exits non-zero with `refusing to gate on an unnamed reference machine`.
++
+ - Perf numbers are advisory until the reference machine is named (plan *Open inherited items*); do not treat a
+   soft budget miss as a pass on unnamed hardware.
+ - Windows users get capture, search, index and canvas; the classifier and any agent-driven file access report
