@@ -1,0 +1,25 @@
+.agents/
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Rust build artifacts
+target/
+src-tauri/target/
+
+# Local cache & model weights
+models/
+*.gguf
+*.onnx
+
+# Sandland Vault (local user data)
+vault/
+.vault/
+
+# System and logs
+*.log
+.DS_Store
+Thumbs.db
+.env
+.env.*
