@@ -1,10 +1,14 @@
 pub mod domain;
 pub mod infra;
+#[cfg(feature = "app")]
 pub mod ipc;
 
+#[cfg(feature = "app")]
 use ipc::vault::AppState;
+#[cfg(feature = "app")]
 use tauri::Manager;
 
+#[cfg(feature = "app")]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -63,7 +67,12 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // Vault IPC
             ipc::vault::create_vault,
+            ipc::vault::init_vault,
             ipc::vault::open_vault,
+            ipc::vault::commit_document,
+            ipc::vault::store_asset,
+            ipc::vault::read_asset,
+            ipc::vault::get_vault_status,
             // Ingest IPC
             ipc::ingest::ingest_file,
             ipc::ingest::ingest_file_content,

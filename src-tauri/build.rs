@@ -1,6 +1,17 @@
 fn main() {
-    // Tauri build hook
-    tauri_build::build();
+    if std::env::var("CARGO_FEATURE_APP").is_ok() {
+        // Tauri build hook - on Windows GNU (MinGW), use without_app_manifest to prevent ld.exe .rsrc merge failure
+        #[cfg(all(windows, target_env = "gnu"))]
+        {
+            let attrs = tauri_build::Attributes::new()
+                .windows_attributes(tauri_build::WindowsAttributes::new_without_app_manifest());
+            tauri_build::try_build(attrs).expect("failed to run tauri-build");
+        }
+        #[cfg(not(all(windows, target_env = "gnu")))]
+        {
+            tauri_build::build();
+        }
+    }
 
     // Statically compile sqlite-vec C amalgamation
     let sqlite_vec_path = std::path::Path::new("vendor/sqlite-vec/sqlite-vec.c");

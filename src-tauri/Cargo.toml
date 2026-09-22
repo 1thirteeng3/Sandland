@@ -14,9 +14,9 @@ tauri-build = { version = "2.0.0", features = [] }
 cc = "1.1"
 
 [dependencies]
-tauri = { version = "2.0.0", features = [] }
-tauri-plugin-shell = "2.0.0"
-tauri-plugin-fs = "2.0.0"
+tauri = { version = "2.0.0", optional = true }
+tauri-plugin-shell = { version = "2.0.0", optional = true }
+tauri-plugin-fs = { version = "2.0.0", optional = true }
 
 # Async & Concurrency
 tokio = { version = "1.40", features = ["full"] }
@@ -38,17 +38,48 @@ notify = "6.1"
 notify-debouncer-full = "0.3"
 
 # AI: Local SLM Inference & Embeddings
-# Fastembed for lightweight multilingual ONNX embeddings
-fastembed = { version = "3.9", default-features = false, features = ["online", "ort-load-dynamic"] }
+# fastembed = { version = "3.9", default-features = false, features = ["online", "ort-load-dynamic"] }
 # Bindings for local GGUF inference via llama.cpp
 llama-cpp-2 = { version = "0.1", optional = true }
 
 # Utilities
-uuid = { version = "1.10", features = ["v7", "serde"] }
+uuid = { version = "1.10", features = ["v4", "v7", "serde"] }
 sha2 = "0.10"
 chrono = { version = "0.4", features = ["serde"] }
 walkdir = "2.5"
+async-trait = "0.1"
+base64 = "0.22"
+
 
 [features]
-default = []
+default = ["app"]
+app = ["dep:tauri", "dep:tauri-plugin-shell", "dep:tauri-plugin-fs"]
 local-ai = ["llama-cpp-2"]
+
+[[bin]]
+name = "sandland"
+path = "src/main.rs"
+required-features = ["app"]
+
+[dev-dependencies]
+tempfile = "3"
+
+[[test]]
+name = "simple_test"
+path = "../tests/simple_test.rs"
+
+[[test]]
+name = "vault_lifecycle_tests"
+path = "../tests/vault_lifecycle_tests.rs"
+
+[[test]]
+name = "atomic_persistence_tests"
+path = "../tests/atomic_persistence_tests.rs"
+
+[[test]]
+name = "cas_deduplication_tests"
+path = "../tests/cas_deduplication_tests.rs"
+
+[[test]]
+name = "anti_toctou_tests"
+path = "../tests/anti_toctou_tests.rs"

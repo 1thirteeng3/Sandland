@@ -1,0 +1,49 @@
+{
+  "validated_at": "2026-09-22",
+  "sprints": 72,
+  "implementation_tasks": 720,
+  "gates": 72,
+  "total_items": 792,
+  "releases": 19,
+  "requirements": 37,
+  "adrs": 18,
+  "dependency_edges": 1546,
+  "unique_ids": true,
+  "all_dependency_refs_resolve": true,
+  "acyclic_graph": true,
+  "all_requirements_have_sprints": true,
+  "markdown_all_ids_once": true,
+  "markdown_fences_balanced": true,
+  "csv_rows_match": true,
+  "xlsx_rows_and_formulas_checked": true,
+  "application_implemented": false,
+  "application_tests_executed": false,
+  "spreadsheet_formulas_executed_in_excel": false,
+  "source_manifest": [
+    {
+      "file": "uploads/Documento de Arquitetura Técnica e Especificação de Produto.md",
+      "sha256": "ff6fecd4adb8bd22855989f483ca7fbfc0c44c8ca512818bf40ced7707c571c7"
+    },
+    {
+      "file": "Sandland-RFC-Integracao-e-Desconstrucao.md",
+      "sha256": "af6eaca45755eb7855d4e00c7de8e56cf612e35074863fa4cab1ae26ec7ffcd6"
+    }
+  ],
+  "outputs": [
+    {
+      "file": "Sandland-Roadmap-v0-a-v2.md",
+      "bytes": 412710,
+      "sha256": "c425bdca6ee28c3701c09bbf6359c0653d4ab95aaaadac8f8e0abf8d59adde76"
+    },
+    {
+      "file": "Sandland-Backlog.xlsx",
+      "bytes": 321545,
+      "sha256": "5d90a092f1e31796b498db0f2006ecad5a7fab8767d21b77944d1cdffd4280bb"
+    },
+    {
+      "file": "Sandland-Backlog.csv",
+      "bytes": 373598,
+      "sha256": "8b805aecbef793f104c9fb0d1cf03a034d9e7fdc40672a088365cf4ba3503415"
+    }
+  ]
+}
