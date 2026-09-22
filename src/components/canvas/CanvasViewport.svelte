@@ -24,10 +24,10 @@
   // Reage a mudanças nos nós ou na viewport para atualizar o PixiRenderer
   $effect(() => {
     // Registra dependências reativas
-    const _nodes = canvasStore.nodes;
-    const _viewport = canvasStore.viewport;
-    const _editing = canvasStore.editingNodeId;
-    const _selected = canvasStore.selectedNodeId;
+    void canvasStore.nodes;
+    void canvasStore.viewport;
+    void canvasStore.editingNodeId;
+    void canvasStore.selectedNodeId;
 
     if (renderer) {
       renderer.updateData();

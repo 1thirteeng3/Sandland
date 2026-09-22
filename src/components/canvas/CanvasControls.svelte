@@ -1,5 +1,9 @@
 <script lang="ts">
   import { canvasStore } from '../../stores/canvas.svelte';
+  import { vaultService } from '../../services/vaultService';
+  import { vaultStore } from '../../stores/vault.svelte';
+
+  let fileInput: HTMLInputElement;
 
   function handleZoomIn() {
     const cx = window.innerWidth / 2;
@@ -24,11 +28,54 @@
     canvasStore.startEditing(node.id);
   }
 
+  function triggerAssetUpload() {
+    if (!vaultStore.isOpen) {
+      vaultStore.toggleModal();
+      return;
+    }
+    fileInput?.click();
+  }
+
+  async function handleFileSelected(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuffer);
+      let binary = '';
+      for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      const base64 = btoa(binary);
+      const ext = file.name.split('.').pop() || 'bin';
+
+      const assetRef = await vaultService.storeAsset(base64, ext);
+      const cx = (window.innerWidth / 2 - canvasStore.viewport.x) / canvasStore.viewport.zoom - 140;
+      const cy = (window.innerHeight / 2 - canvasStore.viewport.y) / canvasStore.viewport.zoom - 110;
+
+      canvasStore.addAssetNode(file.name, assetRef, cx, cy);
+    } catch (err) {
+      console.error('[CanvasControls] Falha ao enviar anexo para o CAS:', err);
+    } finally {
+      input.value = '';
+    }
+  }
+
   let zoomPercentage = $derived(Math.round(canvasStore.viewport.zoom * 100));
 </script>
 
 <div class="canvas-controls">
-  <button class="control-btn primary" onclick={handleAddCell} title="Adicionar Célula">+</button>
+  <button class="control-btn primary" onclick={handleAddCell} title="Adicionar Célula de Texto">+</button>
+  <button class="control-btn" onclick={triggerAssetUpload} title="Adicionar Imagem/Anexo no CAS">🖼️</button>
+  <input
+    type="file"
+    bind:this={fileInput}
+    style="display: none;"
+    accept="image/*,application/pdf"
+    onchange={handleFileSelected}
+  />
   <div class="divider"></div>
   <button class="control-btn" onclick={handleZoomIn} title="Aproximar (Zoom In)">🔍+</button>
   <span class="zoom-badge">{zoomPercentage}%</span>
@@ -51,7 +98,7 @@
     -webkit-backdrop-filter: blur(12px);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-full);
-    box-shadow: var(--shadow-md);
+    box-shadow: var(--shadow-md, 0 4px 12px rgba(0, 0, 0, 0.3));
     z-index: 30;
   }
 
@@ -61,10 +108,12 @@
     border-radius: var(--radius-full);
     background: var(--bg-surface);
     color: var(--text-primary);
+    border: 1px solid transparent;
     font-size: 0.8125rem;
     display: flex;
     align-items: center;
     justify-content: center;
+    cursor: pointer;
     transition: all 0.15s;
   }
 
@@ -88,7 +137,7 @@
 
   .zoom-badge {
     font-size: 0.75rem;
-    font-family: var(--font-mono);
+    font-family: var(--font-mono, 'JetBrains Mono', monospace);
     color: var(--text-secondary);
     min-width: 42px;
     text-align: center;

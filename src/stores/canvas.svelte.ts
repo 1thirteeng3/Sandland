@@ -1,5 +1,8 @@
 import type { CanvasNodeDTO, CanvasEdgeDTO, ViewportStateDTO } from '../types/canvas';
+import type { AssetRefDto } from '../types/vault';
 import { loadBoardTopology, saveBoardTopology } from '../services/canvasService';
+import { vaultService } from '../services/vaultService';
+import { vaultStore } from './vault.svelte';
 
 export class CanvasStore {
   workspaceId = $state<string>('default-workspace');
@@ -8,6 +11,7 @@ export class CanvasStore {
   edges = $state<CanvasEdgeDTO[]>([]);
   selectedNodeId = $state<string | null>(null);
   editingNodeId = $state<string | null>(null);
+  currentRevision = $state<number | null>(null);
 
   private autoSaveTimer: any = null;
 
@@ -36,6 +40,7 @@ export class CanvasStore {
             y: 200,
             width: 280,
             height: 160,
+            nodeType: 'text',
           },
           {
             id: 'node-arch',
@@ -45,6 +50,7 @@ export class CanvasStore {
             y: 200,
             width: 280,
             height: 160,
+            nodeType: 'text',
           },
         ];
         this.edges = [
@@ -72,22 +78,53 @@ export class CanvasStore {
     if (this.autoSaveTimer) {
       clearTimeout(this.autoSaveTimer);
     }
+    // Invariante constitucional: janela máxima de perda de digitação <= 500ms
     this.autoSaveTimer = setTimeout(() => {
       this.persistTopology();
     }, 450);
   }
 
   async persistTopology() {
+    vaultStore.setSyncState('saving');
+    const topoPayload = {
+      workspaceId: this.workspaceId,
+      viewport: this.viewport,
+      nodes: this.nodes,
+      edges: this.edges,
+      updatedAt: Math.floor(Date.now() / 1000),
+    };
+
+    const relPath = `workspaces/${this.workspaceId}/topology.json`;
+    const jsonStr = JSON.stringify(topoPayload, null, 2);
+
     try {
-      await saveBoardTopology(this.workspaceId, {
-        workspaceId: this.workspaceId,
-        viewport: this.viewport,
-        nodes: this.nodes,
-        edges: this.edges,
-        updatedAt: Math.floor(Date.now() / 1000),
-      });
-    } catch (err) {
-      console.error('[CanvasStore] Falha ao persistir topologia do workspace:', err);
+      // 1. Tenta gravar via protocolo atômico em duas fases com journal e snapshot (Sprint 01)
+      const newRev = await vaultService.commitDocument(
+        relPath,
+        jsonStr,
+        this.currentRevision ?? undefined
+      );
+      this.currentRevision = newRev;
+      vaultStore.setSyncState('synced');
+      // Atualiza contador de eventos no header
+      vaultStore.refreshStatus();
+    } catch (err: any) {
+      const errStr = String(err?.message || err);
+      if (errStr.includes('RevisionConflict')) {
+        console.warn('[CanvasStore] Conflito de revisão detectado. Recarregando topologia...');
+        vaultStore.setSyncState('conflict');
+        await this.loadWorkspace(this.workspaceId);
+        return;
+      }
+
+      // Fallback para canal legado de salvamento de topologia caso commit_document não esteja disponível
+      try {
+        await saveBoardTopology(this.workspaceId, topoPayload);
+        vaultStore.setSyncState('synced');
+      } catch (fallbackErr) {
+        console.error('[CanvasStore] Falha ao persistir topologia do workspace:', fallbackErr);
+        vaultStore.setSyncState('error');
+      }
     }
   }
 
@@ -138,10 +175,29 @@ export class CanvasStore {
       id: `node-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       title,
       content,
+      nodeType: 'text',
       x,
       y,
       width: 260,
       height: 150,
+    };
+    this.nodes = [...this.nodes, newNode];
+    this.scheduleAutoSave();
+    return newNode;
+  }
+
+  addAssetNode(title: string, assetRef: AssetRefDto, x: number, y: number): CanvasNodeDTO {
+    const newNode: CanvasNodeDTO = {
+      id: `node-asset-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      title,
+      content: assetRef.canonicalUri,
+      nodeType: 'asset',
+      assetHash: assetRef.sha256Hash,
+      assetExtension: assetRef.extension,
+      x,
+      y,
+      width: 280,
+      height: 220,
     };
     this.nodes = [...this.nodes, newNode];
     this.scheduleAutoSave();

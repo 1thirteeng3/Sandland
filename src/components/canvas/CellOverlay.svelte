@@ -1,16 +1,33 @@
 <script lang="ts">
   import { canvasStore } from '../../stores/canvas.svelte';
-  import { onMount, tick } from 'svelte';
+  import { vaultService } from '../../services/vaultService';
+  import { tick } from 'svelte';
 
   let title = $state('');
   let content = $state('');
   let titleInputRef = $state<HTMLInputElement | null>(null);
+  let assetDataUrl = $state<string | null>(null);
 
   $effect(() => {
     const node = canvasStore.editingNode;
     if (node) {
       title = node.title || '';
       content = node.content || '';
+      assetDataUrl = null;
+
+      // Se for um nó de mídia CAS, lê os bytes base64 para preview
+      if (node.nodeType === 'asset' && node.assetHash) {
+        vaultService
+          .readAsset(node.assetHash)
+          .then((b64) => {
+            const mime = node.assetExtension === 'png' ? 'image/png' : node.assetExtension === 'svg' ? 'image/svg+xml' : 'image/jpeg';
+            assetDataUrl = `data:${mime};base64,${b64}`;
+          })
+          .catch((err) => {
+            console.warn('[CellOverlay] Falha ao carregar preview do CAS:', err);
+          });
+      }
+
       tick().then(() => {
         titleInputRef?.focus();
       });
@@ -69,11 +86,23 @@
         bind:this={titleInputRef}
         bind:value={title}
       />
+
+      {#if canvasStore.editingNode.nodeType === 'asset'}
+        <div class="asset-preview-container">
+          {#if assetDataUrl}
+            <img src={assetDataUrl} alt={title} class="asset-image" />
+          {:else}
+            <div class="asset-loading">Carregando do CAS ({canvasStore.editingNode.assetHash?.slice(0, 10)}...)...</div>
+          {/if}
+        </div>
+      {/if}
+
       <textarea
         class="content-field"
         placeholder="Escreva notas em Markdown..."
         bind:value={content}
       ></textarea>
+
       <div class="overlay-footer">
         <span class="hint">Ctrl+Enter para salvar</span>
         <button class="save-btn" onclick={saveAndClose}>Concluir</button>
@@ -99,7 +128,7 @@
     -webkit-backdrop-filter: blur(12px);
     border: 2px solid var(--accent-blue);
     border-radius: var(--radius-md);
-    box-shadow: var(--shadow-lg), 0 0 20px rgba(59, 130, 246, 0.25);
+    box-shadow: var(--shadow-lg, 0 10px 25px rgba(0, 0, 0, 0.5)), 0 0 20px rgba(59, 130, 246, 0.25);
     display: flex;
     flex-direction: column;
     padding: 10px;
@@ -119,6 +148,29 @@
 
   .title-field:focus {
     border-bottom-color: var(--accent-blue);
+    outline: none;
+  }
+
+  .asset-preview-container {
+    max-height: 120px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+  }
+
+  .asset-image {
+    max-height: 120px;
+    width: auto;
+    object-fit: contain;
+  }
+
+  .asset-loading {
+    font-size: 11px;
+    color: var(--text-muted);
+    padding: 12px;
   }
 
   .content-field {
@@ -129,7 +181,8 @@
     font-size: 0.8125rem;
     line-height: 1.4;
     color: var(--text-primary);
-    font-family: var(--font-sans);
+    font-family: var(--font-sans, 'Inter', sans-serif);
+    outline: none;
   }
 
   .overlay-footer {
@@ -151,7 +204,9 @@
     font-weight: 600;
     background: var(--accent-blue);
     color: #ffffff;
+    border: none;
     border-radius: var(--radius-sm);
+    cursor: pointer;
     transition: opacity 0.15s;
   }
 

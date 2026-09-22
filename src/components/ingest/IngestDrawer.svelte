@@ -22,7 +22,7 @@
         {/if}
       </div>
     </div>
-    <button class="toggle-btn" onclick={() => (isOpen = !isOpen)} aria-label="Alternar gaveta">
+    <button class="toggle-btn" onclick={() => { isOpen = !isOpen; if (!isOpen && onClose) onClose(); }} aria-label="Alternar gaveta">
       {#if isOpen}
         ◀
       {:else}

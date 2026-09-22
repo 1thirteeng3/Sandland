@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { getCurrentWebview } from '@tauri-apps/api/webview';
   import { ingestStore } from '../../stores/ingest.svelte';
+  import { isTauri } from '../../services/ipc';
 
   let isDragging = $state(false);
   let urlInput = $state('');
@@ -11,8 +12,9 @@
 
   onMount(() => {
     let unlisten: (() => void) | undefined;
-    try {
-      getCurrentWebview()
+    if (isTauri()) {
+      try {
+        getCurrentWebview()
         .onDragDropEvent(async (event) => {
           if (event.payload.type === 'over') {
             isDragging = true;
@@ -43,6 +45,7 @@
     } catch {
       // Ambiente de desenvolvimento web sem Tauri
     }
+  }
 
     return () => {
       unlisten?.();

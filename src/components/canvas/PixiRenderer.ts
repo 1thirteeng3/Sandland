@@ -1,5 +1,5 @@
 import { Application, Container, Graphics, Text, TextStyle } from 'pixi.js';
-import type { CanvasNodeDTO, CanvasEdgeDTO, NodeSide } from '../../types/canvas';
+import type { CanvasNodeDTO, NodeSide } from '../../types/canvas';
 import { canvasStore } from '../../stores/canvas.svelte';
 
 export class PixiRenderer {
@@ -15,7 +15,6 @@ export class PixiRenderer {
   private dragOffset = { x: 0, y: 0 };
   private isPanning = false;
   private lastPointer = { x: 0, y: 0 };
-
   private isSpacePressed = false;
 
   constructor(container: HTMLElement) {
@@ -57,21 +56,26 @@ export class PixiRenderer {
     window.addEventListener('keydown', (e) => {
       if (e.code === 'Space') {
         this.isSpacePressed = true;
+        canvas.style.cursor = 'grab';
       }
     });
 
     window.addEventListener('keyup', (e) => {
       if (e.code === 'Space') {
         this.isSpacePressed = false;
+        canvas.style.cursor = 'default';
       }
     });
 
     // Pan do canvas com botão do meio ou arrasto de fundo com botão esquerdo
     canvas.addEventListener('pointerdown', (e) => {
       if (!this.isDraggingNode) {
-        if (e.button === 1 || e.button === 0) {
+        if (e.button === 1 || e.button === 0 || this.isSpacePressed) {
           this.isPanning = true;
           this.lastPointer = { x: e.clientX, y: e.clientY };
+          if (this.isSpacePressed) {
+            canvas.style.cursor = 'grabbing';
+          }
         }
       }
     });
@@ -105,6 +109,11 @@ export class PixiRenderer {
         this.draggedNodeId = null;
       }
       this.isPanning = false;
+      if (this.isSpacePressed) {
+        canvas.style.cursor = 'grab';
+      } else {
+        canvas.style.cursor = 'default';
+      }
     });
 
     // Zoom via Scroll Wheel

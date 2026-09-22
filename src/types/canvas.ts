@@ -18,6 +18,9 @@ export interface CanvasNodeDTO {
   title?: string;
   content?: string;
   colorPreset?: string;
+  nodeType?: 'text' | 'asset' | 'note';
+  assetHash?: string;
+  assetExtension?: string;
 }
 
 export interface CanvasEdgeDTO {

@@ -14,8 +14,8 @@ models/
 *.onnx
 
 # Sandland Vault (local user data)
-vault/
-.vault/
+/vault/
+/.vault/
 
 # System and logs
 *.log
