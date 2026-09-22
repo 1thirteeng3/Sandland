@@ -25,8 +25,14 @@
     }
   }
 
-  function formatDate(timestamp: number) {
-    return new Date(timestamp * 1000).toLocaleDateString('pt-BR', {
+  function formatDate(timestamp: number | string | undefined) {
+    if (!timestamp) return '';
+    const date =
+      typeof timestamp === 'number'
+        ? (timestamp < 10000000000 ? new Date(timestamp * 1000) : new Date(timestamp))
+        : new Date(timestamp);
+    if (isNaN(date.getTime())) return '';
+    return date.toLocaleDateString('pt-BR', {
       day: '2-digit',
       month: 'short',
       hour: '2-digit',
