@@ -7,6 +7,7 @@ dist-ssr/
 # Rust build artifacts
 target/
 src-tauri/target/
+*.dll
 
 # Local cache & model weights
 models/

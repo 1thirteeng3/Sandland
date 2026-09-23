@@ -83,3 +83,19 @@ path = "../tests/cas_deduplication_tests.rs"
 [[test]]
 name = "anti_toctou_tests"
 path = "../tests/anti_toctou_tests.rs"
+
+[[test]]
+name = "ssrf_security_tests"
+path = "../tests/ssrf_security_tests.rs"
+
+[[test]]
+name = "ingest_lifecycle_tests"
+path = "../tests/ingest_lifecycle_tests.rs"
+
+[[test]]
+name = "promote_to_cell_tests"
+path = "../tests/promote_to_cell_tests.rs"
+
+[[test]]
+name = "asset_ingest_tests"
+path = "../tests/asset_ingest_tests.rs"

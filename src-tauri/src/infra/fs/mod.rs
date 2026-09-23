@@ -1,5 +1,6 @@
 pub mod canvas_io;
 pub mod cas;
+pub mod ingest_storage;
 pub mod journal;
 pub mod lifecycle;
 pub mod recovery;

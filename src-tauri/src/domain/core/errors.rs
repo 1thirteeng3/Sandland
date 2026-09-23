@@ -16,6 +16,9 @@ pub enum SecurityError {
 
     #[error("Symlink ou junction aponta para fora dos limites do cofre: {0}")]
     SymlinkEscaped(PathBuf),
+
+    #[error("Tentativa de SSRF bloqueada: {0}")]
+    SsrfBlocked(String),
 }
 
 #[derive(Error, Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -132,6 +135,12 @@ pub enum SandlandError {
 
     #[error("Erro de I/O no disco local: {0}")]
     IoError(String),
+
+    #[error("Item não encontrado: {0}")]
+    NotFound(String),
+
+    #[error("Entrada inválida fornecida: {0}")]
+    InvalidInput(String),
 }
 
 impl From<std::io::Error> for SandlandError {

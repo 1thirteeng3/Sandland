@@ -70,6 +70,8 @@ pub fn parse_frontmatter(raw: &str) -> (Option<serde_json::Value>, String) {
 pub fn initialize_vault_structure(vault_root: &Path) -> SandlandResult<()> {
     let subdirs = [
         ".system",
+        ".history/wal",
+        ".history/events",
         "ingest/notes",
         "ingest/web",
         "ingest/media",

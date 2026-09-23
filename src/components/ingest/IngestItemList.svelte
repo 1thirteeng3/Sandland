@@ -1,5 +1,6 @@
 <script lang="ts">
   import { ingestStore } from '../../stores/ingest.svelte';
+  import { canvasStore } from '../../stores/canvas.svelte';
   import type { IngestedItemDTO } from '../../types/ingest';
 
   let searchQuery = $state('');
@@ -88,6 +89,8 @@
                 id: item.id,
                 title: item.title,
                 content: item.contentSnippet || item.title,
+                sourcePath: item.sourcePath,
+                canonicalUri: item.canonicalUri,
               }));
               e.dataTransfer.effectAllowed = 'copy';
             }
@@ -96,7 +99,12 @@
         >
           <div class="card-header">
             <span class="card-title" title={item.title}>{item.title}</span>
-            <span class="state-badge {getBadgeClass(item.state)}">{item.state}</span>
+            <div class="header-badges">
+              {#if item.wordCount !== undefined && item.wordCount !== null && item.wordCount > 0}
+                <span class="word-count-badge" title="Contagem de palavras">{item.wordCount} pal.</span>
+              {/if}
+              <span class="state-badge {getBadgeClass(item.state)}">{item.state}</span>
+            </div>
           </div>
 
           <p class="card-snippet">{sanitizeDisplaySnippet(item.contentSnippet)}</p>
@@ -113,7 +121,24 @@
                 <span class="tag-more">+{item.tags.length - 3}</span>
               {/if}
             </div>
-            <span class="timestamp">{formatDate(item.createdAt)}</span>
+
+            <div class="card-actions">
+              <span class="timestamp">{formatDate(item.createdAt)}</span>
+              <button
+                type="button"
+                class="promote-btn"
+                title="Promover para a Mesa Espacial (Fork-on-Insert)"
+                onclick={(e) => {
+                  e.stopPropagation();
+                  canvasStore.promoteItemToNode(item);
+                }}
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+                <span>Mesa</span>
+              </button>
+            </div>
           </div>
 
           {#if item.needsManualReview}
@@ -276,6 +301,55 @@
   .tag-more {
     font-size: 0.6875rem;
     color: var(--text-muted);
+  }
+
+  .header-badges {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .word-count-badge {
+    font-size: 0.6875rem;
+    font-weight: 500;
+    padding: 1px 5px;
+    background: rgba(148, 163, 184, 0.12);
+    color: var(--text-secondary);
+    border-radius: var(--radius-sm);
+    border: 1px solid rgba(148, 163, 184, 0.2);
+  }
+
+  .card-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .promote-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 7px;
+    background: rgba(59, 130, 246, 0.15);
+    color: var(--accent-blue);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    border-radius: var(--radius-sm);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease-in-out;
+  }
+
+  .promote-btn:hover {
+    background: var(--accent-blue);
+    color: #ffffff;
+    border-color: var(--accent-blue);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px rgba(59, 130, 246, 0.25);
+  }
+
+  .promote-btn:active {
+    transform: translateY(0);
   }
 
   .timestamp {

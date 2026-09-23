@@ -78,6 +78,7 @@ pub fn run() {
             ipc::ingest::ingest_file_content,
             ipc::ingest::ingest_url,
             ipc::ingest::list_ingested_items,
+            ipc::ingest::promote_to_cell,
             // Taxonomy IPC
             ipc::taxonomy::trigger_classification,
             ipc::taxonomy::update_item_tags,

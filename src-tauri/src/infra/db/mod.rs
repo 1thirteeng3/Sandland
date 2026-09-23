@@ -1,5 +1,6 @@
 pub mod audit;
 pub mod indexer;
+pub mod ingest_repo;
 
 use crate::domain::core::errors::{SandlandError, SandlandResult};
 use refinery::embed_migrations;

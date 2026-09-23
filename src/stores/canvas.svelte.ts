@@ -186,7 +186,9 @@ export class CanvasStore {
     return newNode;
   }
 
-  addAssetNode(title: string, assetRef: AssetRefDto, x: number, y: number): CanvasNodeDTO {
+  addAssetNode(title: string, assetRef: AssetRefDto, x?: number, y?: number): CanvasNodeDTO {
+    const nodeX = x ?? (Math.abs(this.viewport.x) + 220 + (this.nodes.length % 5) * 40);
+    const nodeY = y ?? (Math.abs(this.viewport.y) + 200 + (this.nodes.length % 5) * 30);
     const newNode: CanvasNodeDTO = {
       id: `node-asset-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       title,
@@ -194,11 +196,38 @@ export class CanvasStore {
       nodeType: 'asset',
       assetHash: assetRef.sha256Hash,
       assetExtension: assetRef.extension,
-      x,
-      y,
+      x: nodeX,
+      y: nodeY,
       width: 280,
       height: 220,
     };
+    this.nodes = [...this.nodes, newNode];
+    this.scheduleAutoSave();
+    return newNode;
+  }
+
+  createAssetNode(title: string, assetRef: AssetRefDto, x?: number, y?: number): CanvasNodeDTO {
+    return this.addAssetNode(title, assetRef, x, y);
+  }
+
+  promoteItemToNode(item: any, x?: number, y?: number): CanvasNodeDTO {
+    const nodeX = x ?? (Math.abs(this.viewport.x) + 200 + (this.nodes.length % 5) * 40);
+    const nodeY = y ?? (Math.abs(this.viewport.y) + 180 + (this.nodes.length % 5) * 30);
+
+    const newNode: CanvasNodeDTO = {
+      id: `node-ingest-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      itemId: item.id,
+      localCellPath: item.canonicalUri || item.vaultPath,
+      title: item.title,
+      content: item.summary || item.contentSnippet || item.title,
+      nodeType: item.itemType === 'web_snapshot' ? 'note' : 'text',
+      x: nodeX,
+      y: nodeY,
+      width: 280,
+      height: 160,
+      colorPreset: 'blue',
+    };
+
     this.nodes = [...this.nodes, newNode];
     this.scheduleAutoSave();
     return newNode;

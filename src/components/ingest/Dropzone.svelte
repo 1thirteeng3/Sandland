@@ -2,6 +2,8 @@
   import { onMount } from 'svelte';
   import { getCurrentWebview } from '@tauri-apps/api/webview';
   import { ingestStore } from '../../stores/ingest.svelte';
+  import { canvasStore } from '../../stores/canvas.svelte';
+  import { vaultService } from '../../services/vaultService';
   import { isTauri } from '../../services/ipc';
 
   let isDragging = $state(false);
@@ -9,6 +11,35 @@
   let isSubmitting = $state(false);
   let feedbackMessage = $state<string | null>(null);
   let fileInputRef: HTMLInputElement | undefined = $state();
+
+  function readFileAsBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        const base64 = result.includes(',') ? result.split(',')[1] : result;
+        resolve(base64);
+      };
+      reader.onerror = (error) => reject(error);
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function processImageFile(file: File) {
+    try {
+      feedbackMessage = `Armazenando imagem "${file.name}" no CAS...`;
+      const ext = file.name.split('.').pop()?.toLowerCase() || 'png';
+      const b64 = await readFileAsBase64(file);
+      const assetRef = await vaultService.storeAsset(b64, ext);
+      canvasStore.createAssetNode(file.name, assetRef);
+      feedbackMessage = `Imagem "${file.name}" salva no CAS e na Mesa!`;
+      setTimeout(() => (feedbackMessage = null), 4000);
+    } catch (err: any) {
+      const msg = err?.message || (typeof err === 'object' ? JSON.stringify(err) : String(err));
+      feedbackMessage = `Erro ao salvar imagem: ${msg}`;
+      setTimeout(() => (feedbackMessage = null), 8000);
+    }
+  }
 
   onMount(() => {
     let unlisten: (() => void) | undefined;
@@ -42,10 +73,10 @@
         .then((fn) => {
           unlisten = fn;
         });
-    } catch {
-      // Ambiente de desenvolvimento web sem Tauri
+      } catch {
+        // Ambiente de desenvolvimento web sem Tauri
+      }
     }
-  }
 
     return () => {
       unlisten?.();
@@ -69,7 +100,14 @@
 
     const files = Array.from(e.dataTransfer.files);
     for (const file of files) {
-      if (file.name.endsWith('.md') || file.name.endsWith('.markdown') || file.name.endsWith('.txt') || file.type.includes('text')) {
+      if (file.type.startsWith('image/') || /\.(png|jpe?g|webp|gif|svg)$/i.test(file.name)) {
+        await processImageFile(file);
+      } else if (
+        file.name.endsWith('.md') ||
+        file.name.endsWith('.markdown') ||
+        file.name.endsWith('.txt') ||
+        file.type.includes('text')
+      ) {
         try {
           feedbackMessage = `Ingerindo "${file.name}"...`;
           const content = await file.text();
@@ -91,16 +129,20 @@
 
     const files = Array.from(target.files);
     for (const file of files) {
-      try {
-        feedbackMessage = `Ingerindo "${file.name}"...`;
-        const content = await file.text();
-        await ingestStore.addFileContent(file.name, content);
-        feedbackMessage = `"${file.name}" adicionado com sucesso!`;
-        setTimeout(() => (feedbackMessage = null), 3000);
-      } catch (err: any) {
-        const msg = err?.message || (typeof err === 'object' ? JSON.stringify(err) : String(err));
-        feedbackMessage = `Erro: ${msg}`;
-        setTimeout(() => (feedbackMessage = null), 8000);
+      if (file.type.startsWith('image/') || /\.(png|jpe?g|webp|gif|svg)$/i.test(file.name)) {
+        await processImageFile(file);
+      } else {
+        try {
+          feedbackMessage = `Ingerindo "${file.name}"...`;
+          const content = await file.text();
+          await ingestStore.addFileContent(file.name, content);
+          feedbackMessage = `"${file.name}" adicionado com sucesso!`;
+          setTimeout(() => (feedbackMessage = null), 3000);
+        } catch (err: any) {
+          const msg = err?.message || (typeof err === 'object' ? JSON.stringify(err) : String(err));
+          feedbackMessage = `Erro: ${msg}`;
+          setTimeout(() => (feedbackMessage = null), 8000);
+        }
       }
     }
     target.value = '';
@@ -139,7 +181,7 @@
 <div class="dropzone-container">
   <input
     type="file"
-    accept=".md,.markdown,.txt,text/plain,text/markdown"
+    accept=".md,.markdown,.txt,text/plain,text/markdown,image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
     multiple
     style="display: none;"
     bind:this={fileInputRef}
@@ -165,7 +207,7 @@
         <line x1="12" y1="3" x2="12" y2="15" />
       </svg>
     </div>
-    <p class="primary-text">Arraste notas Markdown aqui</p>
+    <p class="primary-text">Arraste notas Markdown ou imagens aqui</p>
     <p class="secondary-text">ou clique para selecionar arquivos do computador</p>
   </div>
 

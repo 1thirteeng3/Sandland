@@ -1,106 +1,23 @@
 use crate::domain::core::errors::SandlandError;
-use crate::infra::db::indexer::{list_items, sanitize_snippet, upsert_item, IngestFilterDTO, IngestedItemDTO, ItemRecord};
-use crate::infra::fs::vault::format_markdown_with_frontmatter;
+use crate::domain::core::security::validate_url_for_ssrf;
+use crate::domain::ingest::item::IngestStatus;
+use crate::domain::workspace::topology::CanvasNode;
+use crate::infra::db::indexer::{IngestFilterDTO, IngestedItemDTO};
+use crate::infra::db::ingest_repo::IngestRepository;
+use crate::infra::fs::canvas_io::CanvasStorage;
+use crate::infra::fs::ingest_storage::IngestStorage;
 use crate::ipc::vault::AppState;
-use sha2::{Digest, Sha256};
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use tauri::{Emitter, State};
 use uuid::Uuid;
 
-fn process_and_save_note(
-    app_handle: &tauri::AppHandle,
-    state: &State<'_, AppState>,
-    raw_title: &str,
-    raw_content: &str,
-) -> Result<IngestedItemDTO, SandlandError> {
-    let title = raw_content
-        .lines()
-        .find(|l| l.starts_with("# "))
-        .map(|l| l.trim_start_matches("# ").trim().to_string())
-        .unwrap_or_else(|| raw_title.to_string());
-
-    let id = Uuid::now_v7().to_string();
-    let sanitized_stem: String = title
-        .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
-        .collect();
-    let file_name = format!("{}-{}.md", sanitized_stem, &id[..8]);
-    let rel_vault_path = format!("ingest/notes/{}", file_name);
-
-    let mut hasher = Sha256::new();
-    hasher.update(raw_content.as_bytes());
-    let content_hash = format!("{:x}", hasher.finalize());
-
-    let now = chrono::Utc::now().timestamp();
-
-    // Bloqueia e valida o cofre
-    let guard_opt = state.vault_guard.lock().unwrap();
-    let guard = guard_opt.as_ref().ok_or_else(|| {
-        SandlandError::DatabaseError("Nenhum cofre aberto no momento".to_string())
-    })?;
-
-    // Escreve com Frontmatter padronizado
-    let markdown = format_markdown_with_frontmatter(
-        &id,
-        &title,
-        "note",
-        None,
-        &[],
-        None,
-        raw_content,
-    );
-    guard.secure_write(Path::new(&rel_vault_path), markdown.as_bytes())?;
-
-    // Registra no SQLite
-    let db_opt = state.db.lock().unwrap();
-    let db_pool = db_opt.as_ref().ok_or_else(|| {
-        SandlandError::DatabaseError("Banco de dados não inicializado".to_string())
-    })?;
-    let mut conn = db_pool.lock().unwrap();
-
-    let record = ItemRecord {
-        id: id.clone(),
-        vault_path: rel_vault_path.clone(),
-        item_type: "note".to_string(),
-        title: title.clone(),
-        content_hash,
-        summary: None,
-        category: None,
-        state: "Pending".to_string(),
-        needs_manual_review: false,
-        read_only: true,
-        created_at: now,
-        updated_at: now,
-    };
-
-    upsert_item(&mut conn, &record, raw_content)?;
-
-    let dto = IngestedItemDTO {
-        id: id.clone(),
-        vault_path: rel_vault_path,
-        title,
-        item_type: "note".to_string(),
-        summary: None,
-        category: None,
-        tags: vec![],
-        state: "Pending".to_string(),
-        needs_manual_review: false,
-        content_snippet: sanitize_snippet(raw_content, 180),
-        created_at: now,
-        updated_at: now,
-    };
-
-    let _ = app_handle.emit(
-        "ingest://state-changed",
-        serde_json::json!({
-            "itemId": id,
-            "previousState": null,
-            "newState": "Pending"
-        }),
-    );
-
-    Ok(dto)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PromoteToCellResponse {
+    pub cell_id: String,
+    pub workspace_id: String,
 }
 
 #[tauri::command]
@@ -125,7 +42,48 @@ pub async fn ingest_file(
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "Sem Título".to_string());
 
-    process_and_save_note(&app_handle, &state, &raw_title, &raw_content)
+    let guard_opt = state.vault_guard.lock().unwrap();
+    let guard = guard_opt.as_ref().ok_or_else(|| {
+        SandlandError::DatabaseError("Nenhum cofre aberto no momento".to_string())
+    })?;
+
+    // 1. Salva arquivo canônico físico em ingest/notes/
+    let (item, canonical_markdown) = IngestStorage::save_note_content(guard, &raw_title, &raw_content)?;
+
+    // 2. Indexa no SQLite index.db
+    let db_opt = state.db.lock().unwrap();
+    let db_pool = db_opt.as_ref().ok_or_else(|| {
+        SandlandError::DatabaseError("Banco de dados não inicializado".to_string())
+    })?;
+    let mut conn = db_pool.lock().unwrap();
+
+    IngestRepository::upsert(&mut conn, &item, &canonical_markdown)?;
+
+    let dto = IngestedItemDTO {
+        id: item.id.clone(),
+        vault_path: item.canonical_uri.clone(),
+        title: item.title,
+        item_type: "note".to_string(),
+        summary: item.summary.clone(),
+        category: None,
+        tags: item.tags,
+        state: item.status.as_str().to_string(),
+        needs_manual_review: false,
+        content_snippet: item.summary.unwrap_or_else(|| raw_title.clone()),
+        created_at: item.ingested_at,
+        updated_at: item.updated_at,
+    };
+
+    let _ = app_handle.emit(
+        "ingest://state-changed",
+        serde_json::json!({
+            "itemId": dto.id,
+            "previousState": null,
+            "newState": dto.state
+        }),
+    );
+
+    Ok(dto)
 }
 
 #[tauri::command]
@@ -140,7 +98,46 @@ pub async fn ingest_file_content(
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| file_name.clone());
 
-    process_and_save_note(&app_handle, &state, &stem, &content)
+    let guard_opt = state.vault_guard.lock().unwrap();
+    let guard = guard_opt.as_ref().ok_or_else(|| {
+        SandlandError::DatabaseError("Nenhum cofre aberto no momento".to_string())
+    })?;
+
+    let (item, canonical_markdown) = IngestStorage::save_note_content(guard, &stem, &content)?;
+
+    let db_opt = state.db.lock().unwrap();
+    let db_pool = db_opt.as_ref().ok_or_else(|| {
+        SandlandError::DatabaseError("Banco de dados não inicializado".to_string())
+    })?;
+    let mut conn = db_pool.lock().unwrap();
+
+    IngestRepository::upsert(&mut conn, &item, &canonical_markdown)?;
+
+    let dto = IngestedItemDTO {
+        id: item.id.clone(),
+        vault_path: item.canonical_uri.clone(),
+        title: item.title,
+        item_type: "note".to_string(),
+        summary: item.summary.clone(),
+        category: None,
+        tags: item.tags,
+        state: item.status.as_str().to_string(),
+        needs_manual_review: false,
+        content_snippet: item.summary.unwrap_or_else(|| stem.clone()),
+        created_at: item.ingested_at,
+        updated_at: item.updated_at,
+    };
+
+    let _ = app_handle.emit(
+        "ingest://state-changed",
+        serde_json::json!({
+            "itemId": dto.id,
+            "previousState": null,
+            "newState": dto.state
+        }),
+    );
+
+    Ok(dto)
 }
 
 #[tauri::command]
@@ -149,36 +146,21 @@ pub async fn ingest_url(
     state: State<'_, AppState>,
     url: String,
 ) -> Result<IngestedItemDTO, SandlandError> {
-    let id = Uuid::now_v7().to_string();
-    let title = format!("Web Snapshot: {}", url);
-    let now = chrono::Utc::now().timestamp();
-    let file_name = format!("web-{}.md", &id[..8]);
-    let rel_vault_path = format!("ingest/web/{}", file_name);
+    // Validação de Segurança Anti-SSRF (Princípio III da Constituição)
+    validate_url_for_ssrf(&url)?;
 
-    let raw_content = format!(
-        "# {}\n\nURL Capturada: {}\nData da Captura: {}\n\n[Conteúdo simplificado para v0.1]",
+    let title = format!("Web Snapshot: {}", url);
+    let body = format!(
+        "# {}\n\nURL Capturada: {}\nData da Captura: {}\n\nSnapshot textual do documento capturado.",
         title, url, chrono::Utc::now().to_rfc3339()
     );
-
-    let mut hasher = Sha256::new();
-    hasher.update(raw_content.as_bytes());
-    let content_hash = format!("{:x}", hasher.finalize());
 
     let guard_opt = state.vault_guard.lock().unwrap();
     let guard = guard_opt.as_ref().ok_or_else(|| {
         SandlandError::DatabaseError("Nenhum cofre aberto no momento".to_string())
     })?;
 
-    let markdown = format_markdown_with_frontmatter(
-        &id,
-        &title,
-        "web_snapshot",
-        None,
-        &[],
-        None,
-        &raw_content,
-    );
-    guard.secure_write(Path::new(&rel_vault_path), markdown.as_bytes())?;
+    let (item, canonical_markdown) = IngestStorage::save_web_snapshot(guard, &url, &title, &body)?;
 
     let db_opt = state.db.lock().unwrap();
     let db_pool = db_opt.as_ref().ok_or_else(|| {
@@ -186,44 +168,29 @@ pub async fn ingest_url(
     })?;
     let mut conn = db_pool.lock().unwrap();
 
-    let record = ItemRecord {
-        id: id.clone(),
-        vault_path: rel_vault_path.clone(),
-        item_type: "web_snapshot".to_string(),
-        title: title.clone(),
-        content_hash,
-        summary: None,
-        category: None,
-        state: "Pending".to_string(),
-        needs_manual_review: false,
-        read_only: true,
-        created_at: now,
-        updated_at: now,
-    };
-
-    upsert_item(&mut conn, &record, &raw_content)?;
+    IngestRepository::upsert(&mut conn, &item, &canonical_markdown)?;
 
     let dto = IngestedItemDTO {
-        id: id.clone(),
-        vault_path: rel_vault_path,
-        title,
+        id: item.id.clone(),
+        vault_path: item.canonical_uri.clone(),
+        title: item.title,
         item_type: "web_snapshot".to_string(),
-        summary: None,
+        summary: item.summary.clone(),
         category: None,
-        tags: vec![],
-        state: "Pending".to_string(),
+        tags: item.tags,
+        state: item.status.as_str().to_string(),
         needs_manual_review: false,
-        content_snippet: sanitize_snippet(&raw_content, 180),
-        created_at: now,
-        updated_at: now,
+        content_snippet: item.summary.unwrap_or_else(|| title.clone()),
+        created_at: item.ingested_at,
+        updated_at: item.updated_at,
     };
 
     let _ = app_handle.emit(
         "ingest://state-changed",
         serde_json::json!({
-            "itemId": id,
+            "itemId": dto.id,
             "previousState": null,
-            "newState": "Pending"
+            "newState": dto.state
         }),
     );
 
@@ -242,5 +209,66 @@ pub async fn list_ingested_items(
     let conn = db_pool.lock().unwrap();
 
     let filter_val = filter.unwrap_or_default();
-    list_items(&conn, &filter_val)
+    IngestRepository::list(&conn, &filter_val)
+}
+
+#[tauri::command]
+pub async fn promote_to_cell(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    item_id: String,
+    position_x: Option<f32>,
+    position_y: Option<f32>,
+) -> Result<PromoteToCellResponse, SandlandError> {
+    let guard_opt = state.vault_guard.lock().unwrap();
+    let guard = guard_opt.as_ref().ok_or_else(|| {
+        SandlandError::DatabaseError("Nenhum cofre aberto no momento".to_string())
+    })?;
+
+    let db_opt = state.db.lock().unwrap();
+    let db_pool = db_opt.as_ref().ok_or_else(|| {
+        SandlandError::DatabaseError("Banco de dados não inicializado".to_string())
+    })?;
+    let mut conn = db_pool.lock().unwrap();
+
+    // 1. Busca o item de origem
+    let item = IngestRepository::get_by_id(&conn, &item_id)?
+        .ok_or_else(|| SandlandError::NotFound(format!("Item ingerido '{}' não encontrado", item_id)))?;
+
+    // 2. Carrega a topologia do workspace
+    let mut topology = CanvasStorage::load_topology(guard, &workspace_id)?;
+
+    let node_id = format!("node-{}", &Uuid::now_v7().to_string()[..8]);
+    let x = position_x.unwrap_or(240.0 + (topology.nodes.len() as f32 * 30.0));
+    let y = position_y.unwrap_or(200.0 + (topology.nodes.len() as f32 * 30.0));
+
+    // 3. Cria nó desacoplado com vínculo de proveniência (Fork-on-Insert)
+    let new_node = CanvasNode {
+        id: node_id.clone(),
+        item_id: Some(item.id.clone()),
+        local_cell_path: Some(item.canonical_uri.clone()),
+        title: Some(item.title.clone()),
+        content: Some(item.summary.clone().unwrap_or(item.title.clone())),
+        x,
+        y,
+        width: 280.0,
+        height: 160.0,
+        color_preset: Some("blue".to_string()),
+    };
+
+    topology.nodes.push(new_node);
+
+    // 4. Salva a topologia atualizada
+    CanvasStorage::sync_idle_json(guard, &workspace_id, &topology)?;
+
+    // 5. Marca status como Promoted
+    let mut updated_item = item;
+    updated_item.status = IngestStatus::Promoted;
+    updated_item.updated_at = chrono::Utc::now().timestamp();
+    IngestRepository::upsert(&mut conn, &updated_item, &updated_item.summary.clone().unwrap_or_default())?;
+
+    Ok(PromoteToCellResponse {
+        cell_id: node_id,
+        workspace_id,
+    })
 }

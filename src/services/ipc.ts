@@ -160,14 +160,21 @@ function handleBrowserMock<T>(cmd: string, args?: Record<string, unknown>): T {
     case "ingest_file":
     case "ingest_file_content": {
       const name = (args?.fileName || args?.filePath || "documento.md") as string;
+      const baseName = name.split(/[\/\\]/).pop() || name;
       const item = {
-        id: `ingest-${Date.now()}`,
-        sourceType: "file",
+        id: `ingest-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        sourceType: "File",
         sourcePath: name,
-        title: name.split(/[\/\\]/).pop() || name,
-        summary: "Nota importada em modo Web Browser.",
-        ingestedAt: new Date().toISOString(),
-        tags: ["web-import"],
+        canonicalUri: `ingest/notes/${baseName}`,
+        title: baseName,
+        contentSnippet: "Nota física ingerida com sucesso no cofre (modo navegador).",
+        state: "Classified",
+        status: "Pending",
+        wordCount: 142,
+        createdAt: Math.floor(Date.now() / 1000),
+        updatedAt: Math.floor(Date.now() / 1000),
+        tags: ["nota", "markdown"],
+        needsManualReview: false,
       };
       const itemsRaw = localStorage.getItem("sandland_mock_ingest_items");
       const list = itemsRaw ? JSON.parse(itemsRaw) : [];
@@ -178,20 +185,41 @@ function handleBrowserMock<T>(cmd: string, args?: Record<string, unknown>): T {
 
     case "ingest_url": {
       const url = (args?.url || "https://example.com") as string;
+      const host = new URL(url).hostname;
       const item = {
-        id: `ingest-${Date.now()}`,
-        sourceType: "url",
+        id: `ingest-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        sourceType: "Url",
         sourcePath: url,
-        title: `Snapshot: ${url}`,
-        summary: "Captura de URL em modo Web Browser.",
-        ingestedAt: new Date().toISOString(),
-        tags: ["web-snapshot"],
+        canonicalUri: `ingest/web/${host}.md`,
+        title: `Snapshot: ${host}`,
+        contentSnippet: `Conteúdo limpo capturado de ${url}`,
+        state: "Classified",
+        status: "Pending",
+        wordCount: 380,
+        createdAt: Math.floor(Date.now() / 1000),
+        updatedAt: Math.floor(Date.now() / 1000),
+        tags: ["web-snapshot", "leitura"],
+        needsManualReview: false,
       };
       const itemsRaw = localStorage.getItem("sandland_mock_ingest_items");
       const list = itemsRaw ? JSON.parse(itemsRaw) : [];
       list.unshift(item);
       localStorage.setItem("sandland_mock_ingest_items", JSON.stringify(list));
       return item as T;
+    }
+
+    case "promote_to_cell": {
+      const wsId = (args?.workspaceId || "default-workspace") as string;
+      const itemId = (args?.itemId || `item-${Date.now()}`) as string;
+      const cellId = `cell-promoted-${Date.now()}`;
+      const nodeId = `node-promoted-${Date.now()}`;
+      return {
+        cellId,
+        workspaceId: wsId,
+        nodeId,
+        itemId,
+        topologyUpdated: true,
+      } as T;
     }
 
     default:

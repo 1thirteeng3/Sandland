@@ -1,5 +1,11 @@
 import type { IngestedItemDTO, IngestFilterDTO } from '../types/ingest';
-import { listIngestedItems, ingestFile, ingestFileContent, ingestUrl } from '../services/ingestService';
+import {
+  listIngestedItems,
+  ingestFile,
+  ingestFileContent,
+  ingestUrl,
+  promoteToCell,
+} from '../services/ingestService';
 
 export class IngestStore {
   items = $state<IngestedItemDTO[]>([]);
@@ -60,6 +66,25 @@ export class IngestStore {
     } catch (err: any) {
       const errMsg = err?.message || (typeof err === "object" ? JSON.stringify(err) : String(err));
       console.error(`[IngestStore] Erro ao capturar URL "${url}":`, errMsg);
+      throw new Error(errMsg);
+    } finally {
+      this.isLoading = false;
+    }
+  }
+
+  async promoteToWorkspace(workspaceId: string, itemId: string, position?: { x: number; y: number }) {
+    this.isLoading = true;
+    try {
+      const res = await promoteToCell(workspaceId, itemId, position);
+      this.updateItemState(itemId, 'Classified');
+      const item = this.items.find((i) => i.id === itemId);
+      if (item) {
+        item.status = 'Promoted';
+      }
+      return res;
+    } catch (err: any) {
+      const errMsg = err?.message || (typeof err === 'object' ? JSON.stringify(err) : String(err));
+      console.error(`[IngestStore] Erro ao promover item "${itemId}":`, errMsg);
       throw new Error(errMsg);
     } finally {
       this.isLoading = false;

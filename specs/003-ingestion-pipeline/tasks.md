@@ -7,8 +7,8 @@
 
 **Purpose**: Estruturação inicial de diretórios e contratos de dados para ingestão física
 
-- [ ] T001 Configure canonical ingestion directory tree (`ingest/notes/`, `ingest/web/`) in `src-tauri/src/infra/fs/vault.rs`
-- [ ] T002 [P] Define TypeScript DTOs and IPC interfaces matching `contracts/ingest-ipc.json` in `src/types/ingest.ts`
+- [X] T001 Configure canonical ingestion directory tree (`ingest/notes/`, `ingest/web/`) in `src-tauri/src/infra/fs/vault.rs`
+- [X] T002 [P] Define TypeScript DTOs and IPC interfaces matching `contracts/ingest-ipc.json` in `src/types/ingest.ts`
 
 ---
 
@@ -18,11 +18,11 @@
 
 **⚠️ CRITICAL**: Nenhuma estória de usuário pode ser iniciada antes da conclusão desta fase.
 
-- [ ] T003 [P] Implement SQLite schema migration for `ingested_items` and FTS5 virtual table `ingested_items_fts` in `src-tauri/src/infra/db/schema.rs`
-- [ ] T004 [P] Create `IngestRepository` with CRUD and FTS5 search queries in `src-tauri/src/infra/db/ingest_repo.rs`
-- [ ] T005 Create domain models `IngestedItem`, `SourceType`, `IngestStatus` in `src-tauri/src/domain/ingest/item.rs`
-- [ ] T006 [P] Implement Markdown frontmatter and word count parser in `src-tauri/src/domain/ingest/parser.rs`
-- [ ] T007 Register `IngestRepository` and database access in Tauri `AppState` in `src-tauri/src/ipc/vault.rs` and `src-tauri/src/lib.rs`
+- [X] T003 [P] Implement SQLite schema migration for `ingested_items` and FTS5 virtual table `ingested_items_fts` in `src-tauri/src/infra/db/schema.rs`
+- [X] T004 [P] Create `IngestRepository` with CRUD and FTS5 search queries in `src-tauri/src/infra/db/ingest_repo.rs`
+- [X] T005 Create domain models `IngestedItem`, `SourceType`, `IngestStatus` in `src-tauri/src/domain/ingest/item.rs`
+- [X] T006 [P] Implement Markdown frontmatter and word count parser in `src-tauri/src/domain/ingest/parser.rs`
+- [X] T007 Register `IngestRepository` and database access in Tauri `AppState` in `src-tauri/src/ipc/vault.rs` and `src-tauri/src/lib.rs`
 
 **Checkpoint**: Fundação pronta - a implementação das estórias de usuário pode iniciar em paralelo.
 
@@ -36,15 +36,15 @@
 
 ### Tests for User Story 1
 
-- [ ] T008 [P] [US1] Create integration test for physical note ingestion and SQLite indexing in `tests/ingest_lifecycle_tests.rs`
+- [X] T008 [P] [US1] Create integration test for physical note ingestion and SQLite indexing in `tests/ingest_lifecycle_tests.rs`
 
 ### Implementation for User Story 1
 
-- [ ] T009 [US1] Implement physical file copy and atomic write for notes in `src-tauri/src/infra/fs/ingest_storage.rs` using `VaultGuard`
-- [ ] T010 [US1] Implement IPC commands `ingest_file`, `ingest_file_content` and `list_ingested_items` in `src-tauri/src/ipc/ingest.rs`
-- [ ] T011 [P] [US1] Connect `src/services/ingestService.ts` to native Tauri IPC commands
-- [ ] T012 [US1] Update `src/stores/ingest.svelte.ts` to manage ingested items state, pagination and FTS search query
-- [ ] T013 [US1] Update `src/components/ingest/Dropzone.svelte` and `src/components/ingest/IngestItemList.svelte` to trigger ingestion and render item cards with word count and tags
+- [X] T009 [US1] Implement physical file copy and atomic write for notes in `src-tauri/src/infra/fs/ingest_storage.rs` using `VaultGuard`
+- [X] T010 [US1] Implement IPC commands `ingest_file`, `ingest_file_content` and `list_ingested_items` in `src-tauri/src/ipc/ingest.rs`
+- [X] T011 [P] [US1] Connect `src/services/ingestService.ts` to native Tauri IPC commands
+- [X] T012 [US1] Update `src/stores/ingest.svelte.ts` to manage ingested items state, pagination and FTS search query
+- [X] T013 [US1] Update `src/components/ingest/Dropzone.svelte` and `src/components/ingest/IngestItemList.svelte` to trigger ingestion and render item cards with word count and tags
 
 **Checkpoint**: User Story 1 (MVP) concluída e testável de forma independente.
 
@@ -58,13 +58,13 @@
 
 ### Tests for User Story 2
 
-- [ ] T014 [P] [US2] Create integration test for Fork-on-Insert cell promotion and provenance metadata in `tests/promote_to_cell_tests.rs`
+- [X] T014 [P] [US2] Create integration test for Fork-on-Insert cell promotion and provenance metadata in `tests/promote_to_cell_tests.rs`
 
 ### Implementation for User Story 2
 
-- [ ] T015 [US2] Implement IPC command `promote_to_cell` in `src-tauri/src/ipc/ingest.rs` instantiating a decoupled cell in workspace topology
-- [ ] T016 [P] [US2] Implement `promoteItemToCell` method in `src/stores/canvas.svelte.ts` linking provenance attributes (`sourcePath`, `sourceHash`)
-- [ ] T017 [US2] Add promotion button ("Adicionar à Mesa") and drag handle in `src/components/ingest/IngestItemList.svelte`
+- [X] T015 [US2] Implement IPC command `promote_to_cell` in `src-tauri/src/ipc/ingest.rs` instantiating a decoupled cell in workspace topology
+- [X] T016 [P] [US2] Implement `promoteItemToCell` method in `src/stores/canvas.svelte.ts` linking provenance attributes (`sourcePath`, `sourceHash`)
+- [X] T017 [US2] Add promotion button ("Adicionar à Mesa") and drag handle in `src/components/ingest/IngestItemList.svelte`
 
 **Checkpoint**: User Stories 1 e 2 operam de forma integrada e independente.
 
@@ -78,12 +78,12 @@
 
 ### Tests for User Story 3
 
-- [ ] T018 [P] [US3] Create integration test for CAS asset ingestion and deduplication in `tests/asset_ingest_tests.rs`
+- [X] T018 [P] [US3] Create integration test for CAS asset ingestion and deduplication in `tests/asset_ingest_tests.rs`
 
 ### Implementation for User Story 3
 
-- [ ] T019 [US3] Wire image drop in `src/components/ingest/Dropzone.svelte` to call `vaultService.storeAsset` and register asset record
-- [ ] T020 [US3] Add asset thumbnail preview and image badge in `src/components/ingest/IngestItemList.svelte`
+- [X] T019 [US3] Wire image drop in `src/components/ingest/Dropzone.svelte` to call `vaultService.storeAsset` and register asset record
+- [X] T020 [US3] Add asset thumbnail preview and image badge in `src/components/ingest/IngestItemList.svelte`
 
 **Checkpoint**: Ingestão de notas e imagens no CAS operando conjuntamente.
 
@@ -97,13 +97,13 @@
 
 ### Tests for User Story 4
 
-- [ ] T021 [P] [US4] Create unit test for Anti-SSRF URL validator in `tests/ssrf_security_tests.rs`
+- [X] T021 [P] [US4] Create unit test for Anti-SSRF URL validator in `tests/ssrf_security_tests.rs`
 
 ### Implementation for User Story 4
 
-- [ ] T022 [US4] Implement Anti-SSRF validator (blocking loopback, private RFC 1918 IPs and link-local) in `src-tauri/src/domain/core/security.rs`
-- [ ] T023 [US4] Implement URL snapshot fetching and Markdown conversion in `src-tauri/src/infra/fs/ingest_storage.rs`
-- [ ] T024 [US4] Implement IPC command `ingest_url` in `src-tauri/src/ipc/ingest.rs` and connect to URL input in `src/components/ingest/Dropzone.svelte`
+- [X] T022 [US4] Implement Anti-SSRF validator (blocking loopback, private RFC 1918 IPs and link-local) in `src-tauri/src/domain/core/security.rs`
+- [X] T023 [US4] Implement URL snapshot fetching and Markdown conversion in `src-tauri/src/infra/fs/ingest_storage.rs`
+- [X] T024 [US4] Implement IPC command `ingest_url` in `src-tauri/src/ipc/ingest.rs` and connect to URL input in `src/components/ingest/Dropzone.svelte`
 
 **Checkpoint**: Todas as 4 estórias de usuário implementadas e validadas.
 
@@ -113,9 +113,9 @@
 
 **Purpose**: Sincronização e validação ponta a ponta
 
-- [ ] T025 [P] Update browser mock handler in `src/services/ipc.ts` to simulate all new ingestion behaviors in `localhost:1420`
-- [ ] T026 Implement cold start rehydration of physical notes from `ingest/notes/` into `index.db` in `src-tauri/src/infra/fs/vault.rs`
-- [ ] T027 Run full test suite (`cargo test`, `npm.cmd run check`, `npm.cmd run build`) and validate against scenarios in `specs/003-ingestion-pipeline/quickstart.md`
+- [X] T025 [P] Update browser mock handler in `src/services/ipc.ts` to simulate all new ingestion behaviors in `localhost:1420`
+- [X] T026 Implement cold start rehydration of physical notes from `ingest/notes/` into `index.db` in `src-tauri/src/infra/fs/vault.rs`
+- [X] T027 Run full test suite (`cargo test`, `npm.cmd run check`, `npm.cmd run build`) and validate against scenarios in `specs/003-ingestion-pipeline/quickstart.md`
 
 ---
 
