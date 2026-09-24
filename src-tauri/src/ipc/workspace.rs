@@ -232,3 +232,101 @@ pub async fn list_cells(
 ) -> Result<Vec<CellDTO>, SandlandError> {
     Ok(vec![])
 }
+
+// ---------------------------------------------------------
+// COMANDOS IPC DE PEÇAS EDITORIAIS & PROVENIÊNCIA (SPRINT 04)
+// ---------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PieceSaveResponseDTO {
+    pub piece_id: String,
+    pub path: String,
+    pub word_count: u32,
+    pub updated_at: i64,
+}
+
+#[tauri::command]
+pub async fn list_workspace_pieces(
+    state: State<'_, AppState>,
+    workspace_id: String,
+) -> Result<Vec<crate::infra::fs::piece_io::PieceSummary>, SandlandError> {
+    let guard_opt = state.vault_guard.lock().unwrap();
+    let guard = guard_opt.as_ref().ok_or_else(|| {
+        SandlandError::DatabaseError("Nenhum cofre aberto".to_string())
+    })?;
+
+    crate::infra::fs::piece_io::PieceStorage::list_pieces(guard, &workspace_id)
+}
+
+#[tauri::command]
+pub async fn read_workspace_piece(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    piece_id: String,
+) -> Result<crate::domain::workspace::piece::EditorialPiece, SandlandError> {
+    let guard_opt = state.vault_guard.lock().unwrap();
+    let guard = guard_opt.as_ref().ok_or_else(|| {
+        SandlandError::DatabaseError("Nenhum cofre aberto".to_string())
+    })?;
+
+    crate::infra::fs::piece_io::PieceStorage::read_piece(guard, &workspace_id, &piece_id)
+}
+
+#[tauri::command]
+pub async fn save_workspace_piece(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    piece: crate::domain::workspace::piece::EditorialPiece,
+) -> Result<PieceSaveResponseDTO, SandlandError> {
+    let guard_opt = state.vault_guard.lock().unwrap();
+    let guard = guard_opt.as_ref().ok_or_else(|| {
+        SandlandError::DatabaseError("Nenhum cofre aberto".to_string())
+    })?;
+
+    let piece_id = piece.id.clone();
+    let (path, word_count, updated_at) =
+        crate::infra::fs::piece_io::PieceStorage::save_piece(guard, &workspace_id, piece)?;
+
+    Ok(PieceSaveResponseDTO {
+        piece_id,
+        path,
+        word_count,
+        updated_at,
+    })
+}
+
+#[tauri::command]
+pub async fn check_piece_citations_drift(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    piece_id: String,
+) -> Result<Vec<crate::infra::fs::piece_io::CitationDriftItem>, SandlandError> {
+    let guard_opt = state.vault_guard.lock().unwrap();
+    let guard = guard_opt.as_ref().ok_or_else(|| {
+        SandlandError::DatabaseError("Nenhum cofre aberto".to_string())
+    })?;
+
+    crate::infra::fs::piece_io::PieceStorage::check_drift(guard, &workspace_id, &piece_id)
+}
+
+#[tauri::command]
+pub async fn compile_piece_export(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    piece_id: String,
+    include_references: Option<bool>,
+) -> Result<String, SandlandError> {
+    let guard_opt = state.vault_guard.lock().unwrap();
+    let guard = guard_opt.as_ref().ok_or_else(|| {
+        SandlandError::DatabaseError("Nenhum cofre aberto".to_string())
+    })?;
+
+    crate::infra::fs::piece_io::PieceStorage::compile_export(
+        guard,
+        &workspace_id,
+        &piece_id,
+        include_references.unwrap_or(true),
+    )
+}
+

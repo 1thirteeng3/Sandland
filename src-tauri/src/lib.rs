@@ -91,6 +91,12 @@ pub fn run() {
             ipc::workspace::read_workspace_cell,
             ipc::workspace::create_cell,
             ipc::workspace::list_cells,
+            // Editorial Pieces IPC
+            ipc::workspace::list_workspace_pieces,
+            ipc::workspace::read_workspace_piece,
+            ipc::workspace::save_workspace_piece,
+            ipc::workspace::check_piece_citations_drift,
+            ipc::workspace::compile_piece_export,
         ])
         .run(tauri::generate_context!())
         .expect("Erro ao executar aplicação Sandland Tauri");

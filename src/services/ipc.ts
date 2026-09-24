@@ -270,6 +270,113 @@ function handleBrowserMock<T>(cmd: string, args?: Record<string, unknown>): T {
       } as T;
     }
 
+    case "list_workspace_pieces": {
+      const wsId = (args?.workspaceId || "default-workspace") as string;
+      const raw = localStorage.getItem(`sandland_pieces:${wsId}`);
+      if (!raw) return [] as T;
+      const pieces = JSON.parse(raw);
+      return pieces.map((p: any) => ({
+        id: p.id,
+        workspaceId: p.workspaceId || wsId,
+        title: p.title,
+        slug: p.slug,
+        citationCount: p.citations ? p.citations.length : 0,
+        wordCount: p.body ? p.body.trim().split(/\s+/).filter(Boolean).length : 0,
+        updatedAt: p.updatedAt || Math.floor(Date.now() / 1000),
+      })) as T;
+    }
+
+    case "read_workspace_piece": {
+      const wsId = (args?.workspaceId || "default-workspace") as string;
+      const pieceId = args?.pieceId as string;
+      const raw = localStorage.getItem(`sandland_pieces:${wsId}`);
+      const pieces = raw ? JSON.parse(raw) : [];
+      const found = pieces.find((p: any) => p.id === pieceId);
+      if (!found) {
+        throw new Error(`NotFound: Peça '${pieceId}' não encontrada.`);
+      }
+      return found as T;
+    }
+
+    case "save_workspace_piece": {
+      const wsId = (args?.workspaceId || "default-workspace") as string;
+      const piece = (args?.piece || {}) as any;
+      const raw = localStorage.getItem(`sandland_pieces:${wsId}`);
+      let pieces = raw ? JSON.parse(raw) : [];
+      const now = Math.floor(Date.now() / 1000);
+      piece.updatedAt = now;
+      if (!piece.createdAt) piece.createdAt = now;
+
+      const idx = pieces.findIndex((p: any) => p.id === piece.id);
+      if (idx >= 0) {
+        pieces[idx] = piece;
+      } else {
+        pieces.push(piece);
+      }
+      localStorage.setItem(`sandland_pieces:${wsId}`, JSON.stringify(pieces));
+      const wordCount = piece.body ? piece.body.trim().split(/\s+/).filter(Boolean).length : 0;
+      return {
+        pieceId: piece.id,
+        path: `workspaces/${wsId}/pieces/${piece.id}.md`,
+        wordCount,
+        updatedAt: now,
+      } as T;
+    }
+
+    case "check_piece_citations_drift": {
+      const wsId = (args?.workspaceId || "default-workspace") as string;
+      const pieceId = args?.pieceId as string;
+      const raw = localStorage.getItem(`sandland_pieces:${wsId}`);
+      const pieces = raw ? JSON.parse(raw) : [];
+      const found = pieces.find((p: any) => p.id === pieceId);
+      if (!found || !found.citations) return [] as T;
+
+      // Mock drift status: if cited revision matches current cell revision, Synchronized
+      const topoRaw = localStorage.getItem(`sandland_topology:${wsId}`);
+      const topo = topoRaw ? JSON.parse(topoRaw) : { nodes: [] };
+      return found.citations.map((c: any) => {
+        const node = topo.nodes.find((n: any) => n.id === c.sourceCellId || n.cellId === c.sourceCellId);
+        if (!node) {
+          return {
+            citationId: c.id,
+            sourceCellId: c.sourceCellId,
+            status: "Orphaned",
+            citedRevision: c.sourceRevision,
+          };
+        }
+        const currentRev = node.revision ?? 1;
+        const status = currentRev > c.sourceRevision ? "Diverged" : "Synchronized";
+        return {
+          citationId: c.id,
+          sourceCellId: c.sourceCellId,
+          status,
+          citedRevision: c.sourceRevision,
+          currentRevision: currentRev,
+          currentTitle: node.title,
+          currentSnippet: node.content,
+        };
+      }) as T;
+    }
+
+    case "compile_piece_export": {
+      const wsId = (args?.workspaceId || "default-workspace") as string;
+      const pieceId = args?.pieceId as string;
+      const includeRef = args?.includeReferences !== false;
+      const raw = localStorage.getItem(`sandland_pieces:${wsId}`);
+      const pieces = raw ? JSON.parse(raw) : [];
+      const found = pieces.find((p: any) => p.id === pieceId);
+      if (!found) throw new Error("NotFound: Peça não encontrada");
+
+      let out = `# ${found.title}\n\n${found.body}`;
+      if (includeRef && found.citations && found.citations.length > 0) {
+        out += "\n\n---\n\n## Referências & Proveniência\n\n";
+        found.citations.forEach((c: any, i: number) => {
+          out += `${i + 1}. **${c.sourceTitle || c.sourceCellId}** (rev. ${c.sourceRevision}): "${c.quote}"\n`;
+        });
+      }
+      return out as T;
+    }
+
     default:
       return undefined as T;
   }

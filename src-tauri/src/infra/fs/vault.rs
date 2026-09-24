@@ -78,6 +78,7 @@ pub fn initialize_vault_structure(vault_root: &Path) -> SandlandResult<()> {
         "workspaces",
         "workspaces/default-workspace",
         "workspaces/default-workspace/cells",
+        "workspaces/default-workspace/pieces",
         "assets",
         "intentions",
     ];
@@ -94,7 +95,9 @@ pub fn initialize_vault_structure(vault_root: &Path) -> SandlandResult<()> {
 pub fn ensure_workspace_structure(vault_root: &Path, workspace_id: &str) -> SandlandResult<std::path::PathBuf> {
     let ws_dir = vault_root.join("workspaces").join(workspace_id);
     let cells_dir = ws_dir.join("cells");
+    let pieces_dir = ws_dir.join("pieces");
     std::fs::create_dir_all(&cells_dir)?;
+    std::fs::create_dir_all(&pieces_dir)?;
     Ok(ws_dir)
 }
 

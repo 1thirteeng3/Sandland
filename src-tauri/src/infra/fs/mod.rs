@@ -3,6 +3,7 @@ pub mod cas;
 pub mod ingest_storage;
 pub mod journal;
 pub mod lifecycle;
+pub mod piece_io;
 pub mod recovery;
 pub mod traits;
 pub mod vault;

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { canvasStore } from '../../stores/canvas.svelte';
+  import { pieceStore } from '../../stores/piece.svelte';
   import { vaultService } from '../../services/vaultService';
   import { tick } from 'svelte';
 
@@ -119,6 +120,43 @@
       <div class="overlay-footer">
         <span class="hint">Esc ou Ctrl+Enter para salvar</span>
         <div class="btn-group">
+          <button
+            class="cite-btn"
+            draggable="true"
+            ondragstart={(e) => {
+              if (canvasStore.editingNode && e.dataTransfer) {
+                e.dataTransfer.setData(
+                  'application/json',
+                  JSON.stringify({
+                    id: canvasStore.editingNode.id,
+                    title: canvasStore.editingTitle,
+                    content: canvasStore.editingContent,
+                    revision: canvasStore.editingNode.revision || 1,
+                    assetHash: canvasStore.editingNode.assetHash,
+                  })
+                );
+                e.dataTransfer.effectAllowed = 'copy';
+              }
+            }}
+            onclick={async () => {
+              if (canvasStore.editingNode) {
+                await pieceStore.insertCitationFromNode({
+                  id: canvasStore.editingNode.id,
+                  title: canvasStore.editingTitle,
+                  content: canvasStore.editingContent,
+                  revision: canvasStore.editingNode.revision || 1,
+                  assetHash: canvasStore.editingNode.assetHash,
+                });
+                if (pieceStore.viewMode === 'board') {
+                  pieceStore.setViewMode('split');
+                }
+              }
+            }}
+            title="Arrastar ou clicar para citar na Peça Editorial (Fork-on-Insert)"
+          >
+            <span class="btn-icon">📋</span>
+            <span>Citar na Peça</span>
+          </button>
           <button class="delete-btn" onclick={() => {
             if (canvasStore.editingNode) {
               const id = canvasStore.editingNode.id;
@@ -268,6 +306,32 @@
 
   .delete-btn:hover {
     background: rgba(239, 68, 68, 0.1);
+  }
+
+  .cite-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    background: rgba(99, 102, 241, 0.15);
+    color: #a5b4fc;
+    border: 1px solid rgba(99, 102, 241, 0.4);
+    border-radius: var(--radius-sm, 4px);
+    cursor: grab;
+    transition: all 0.15s;
+    user-select: none;
+  }
+
+  .cite-btn:hover {
+    background: rgba(99, 102, 241, 0.25);
+    border-color: rgba(99, 102, 241, 0.7);
+    color: #ffffff;
+  }
+
+  .cite-btn:active {
+    cursor: grabbing;
   }
 
   .save-btn {

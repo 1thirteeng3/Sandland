@@ -3,11 +3,13 @@
   import { ingestStore } from "./stores/ingest.svelte";
   import { canvasStore } from "./stores/canvas.svelte";
   import { vaultStore } from "./stores/vault.svelte";
+  import { pieceStore } from "./stores/piece.svelte";
   import IngestDrawer from "./components/ingest/IngestDrawer.svelte";
   import CanvasViewport from "./components/canvas/CanvasViewport.svelte";
+  import EditorialView from "./components/editorial/EditorialView.svelte";
   import VaultModal from "./components/vault/VaultModal.svelte";
 
-  let isIngestOpen = $state(true);
+  let isIngestOpen = $state(false);
   let activeWorkspaceTitle = $state("Mesa de Pesquisa Principal");
 
   onMount(async () => {
@@ -16,6 +18,7 @@
       await Promise.allSettled([
         ingestStore.loadItems(),
         canvasStore.loadWorkspace("default-workspace"),
+        pieceStore.loadWorkspace("default-workspace"),
       ]);
     } catch (err) {
       console.error("[App] Falha na hidratação inicial:", err);
@@ -69,6 +72,49 @@
       </div>
     </div>
 
+    <!-- View Mode Switcher: Mesa / Split-View / Peça -->
+    <div class="header-center">
+      <div class="view-mode-group">
+        <button
+          class="view-mode-btn {pieceStore.viewMode === 'board' ? 'active' : ''}"
+          onclick={() => pieceStore.setViewMode('board')}
+          title="Modo Mesa Espacial (PixiJS Canvas)"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+            <path d="M3 9h18M9 21V9" />
+          </svg>
+          <span>Mesa</span>
+        </button>
+
+        <button
+          class="view-mode-btn {pieceStore.viewMode === 'split' ? 'active' : ''}"
+          onclick={() => pieceStore.setViewMode('split')}
+          title="Modo Dividido: Mesa à Esquerda, Peça à Direita (Fork-on-Insert)"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+            <line x1="12" y1="3" x2="12" y2="21" />
+          </svg>
+          <span>Split-View</span>
+        </button>
+
+        <button
+          class="view-mode-btn {pieceStore.viewMode === 'piece' ? 'active' : ''}"
+          onclick={() => pieceStore.setViewMode('piece')}
+          title="Modo Peça Editorial (Documento Longo)"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <polyline points="14 2 14 8 20 8" />
+            <line x1="16" y1="13" x2="8" y2="13" />
+            <line x1="16" y1="17" x2="8" y2="17" />
+          </svg>
+          <span>Peça</span>
+        </button>
+      </div>
+    </div>
+
     <div class="header-right">
       <button 
         class="action-btn" 
@@ -84,7 +130,21 @@
 
   <!-- Central Workspace & Canvas Area -->
   <div class="workspace-body">
-    <CanvasViewport />
+    {#if pieceStore.viewMode === 'board'}
+      <CanvasViewport />
+    {:else if pieceStore.viewMode === 'piece'}
+      <EditorialView />
+    {:else if pieceStore.viewMode === 'split'}
+      <div class="split-view-container">
+        <div class="split-pane canvas-pane">
+          <CanvasViewport />
+        </div>
+        <div class="split-pane editorial-pane">
+          <EditorialView />
+        </div>
+      </div>
+    {/if}
+
     <IngestDrawer bind:isOpen={isIngestOpen} onClose={() => (isIngestOpen = false)} />
   </div>
 
@@ -270,5 +330,77 @@
     position: relative;
     display: flex;
     overflow: hidden;
+  }
+
+  .header-center {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .view-mode-group {
+    display: flex;
+    align-items: center;
+    background: rgba(15, 18, 24, 0.7);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: var(--radius-md, 8px);
+    padding: 2px;
+    gap: 2px;
+  }
+
+  .view-mode-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: #94a3b8;
+    font-size: 0.75rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .view-mode-btn:hover {
+    color: #f1f5f9;
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .view-mode-btn.active {
+    background: #1e2430;
+    color: #60a5fa;
+    border-color: rgba(96, 165, 250, 0.3);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  }
+
+  .drift-header-indicator {
+    font-size: 0.7rem;
+    line-height: 1;
+  }
+
+  .split-view-container {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .split-pane {
+    height: 100%;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .split-pane.canvas-pane {
+    flex: 1;
+    min-width: 320px;
+    border-right: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .split-pane.editorial-pane {
+    flex: 1.1;
+    min-width: 400px;
   }
 </style>

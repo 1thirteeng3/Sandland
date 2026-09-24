@@ -21,6 +21,7 @@ export interface CanvasNodeDTO {
   nodeType?: 'text' | 'asset' | 'note';
   assetHash?: string;
   assetExtension?: string;
+  revision?: number;
 }
 
 export interface CanvasEdgeDTO {

@@ -112,3 +112,15 @@ path = "../tests/canvas_topology_tests.rs"
 name = "lod_performance_tests"
 path = "../tests/lod_performance_tests.rs"
 
+[[test]]
+name = "piece_markdown_tests"
+path = "../tests/piece_markdown_tests.rs"
+
+[[test]]
+name = "piece_citation_tests"
+path = "../tests/piece_citation_tests.rs"
+
+[[test]]
+name = "piece_drift_tests"
+path = "../tests/piece_drift_tests.rs"
+
