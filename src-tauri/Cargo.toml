@@ -99,3 +99,16 @@ path = "../tests/promote_to_cell_tests.rs"
 [[test]]
 name = "asset_ingest_tests"
 path = "../tests/asset_ingest_tests.rs"
+
+[[test]]
+name = "cell_markdown_tests"
+path = "../tests/cell_markdown_tests.rs"
+
+[[test]]
+name = "canvas_topology_tests"
+path = "../tests/canvas_topology_tests.rs"
+
+[[test]]
+name = "lod_performance_tests"
+path = "../tests/lod_performance_tests.rs"
+

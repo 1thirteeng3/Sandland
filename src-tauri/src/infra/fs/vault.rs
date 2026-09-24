@@ -76,6 +76,8 @@ pub fn initialize_vault_structure(vault_root: &Path) -> SandlandResult<()> {
         "ingest/web",
         "ingest/media",
         "workspaces",
+        "workspaces/default-workspace",
+        "workspaces/default-workspace/cells",
         "assets",
         "intentions",
     ];
@@ -86,6 +88,14 @@ pub fn initialize_vault_structure(vault_root: &Path) -> SandlandResult<()> {
     }
 
     Ok(())
+}
+
+/// Garante a estrutura de diretórios canônica para um workspace específico
+pub fn ensure_workspace_structure(vault_root: &Path, workspace_id: &str) -> SandlandResult<std::path::PathBuf> {
+    let ws_dir = vault_root.join("workspaces").join(workspace_id);
+    let cells_dir = ws_dir.join("cells");
+    std::fs::create_dir_all(&cells_dir)?;
+    Ok(ws_dir)
 }
 
 /// Rotina de Hidratação do Cofre no Startup (File-as-Truth):

@@ -108,3 +108,49 @@ fn test_crash_recovery_purges_orphan_temp_files_and_replays_committed_snapshot()
     assert!(target_file.exists());
     assert_eq!(fs::read(&target_file).unwrap(), expected_payload);
 }
+
+#[test]
+fn test_canvas_storage_occ_revision_conflict() {
+    let dir = tempdir().unwrap();
+    let root = dir.path().join("cofre_occ");
+    sandland_lib::infra::fs::vault::initialize_vault_structure(&root).unwrap();
+    let guard = sandland_lib::infra::fs::vault::VaultGuard::new(root).unwrap();
+
+    let mut topo = sandland_lib::domain::workspace::topology::BoardTopology::new("ws-test".to_string());
+    
+    // Primeiro save: deve ter sucesso e retornar revision 1
+    let rev1 = sandland_lib::infra::fs::canvas_io::CanvasStorage::save_board_topology(
+        &guard,
+        "ws-test",
+        topo.clone(),
+        None,
+    ).unwrap();
+    assert_eq!(rev1, 1);
+
+    // Segundo save com expected_revision correta (1): deve ter sucesso e retornar revision 2
+    topo.revision = rev1;
+    let rev2 = sandland_lib::infra::fs::canvas_io::CanvasStorage::save_board_topology(
+        &guard,
+        "ws-test",
+        topo.clone(),
+        Some(1),
+    ).unwrap();
+    assert_eq!(rev2, 2);
+
+    // Terceiro save com expected_revision desatualizada (1 em vez de 2): deve retornar RevisionConflict
+    let err = sandland_lib::infra::fs::canvas_io::CanvasStorage::save_board_topology(
+        &guard,
+        "ws-test",
+        topo.clone(),
+        Some(1),
+    ).unwrap_err();
+
+    match err {
+        sandland_lib::domain::core::errors::SandlandError::RevisionConflict { expected, actual } => {
+            assert_eq!(expected, Some(1));
+            assert_eq!(actual, 2);
+        }
+        other => panic!("Esperado erro RevisionConflict, recebido {:?}", other),
+    }
+}
+

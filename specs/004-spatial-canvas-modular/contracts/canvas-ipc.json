@@ -1,0 +1,155 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Canvas & Workspace IPC Contracts",
+  "description": "Definição formal de contratos de comunicação IPC entre WebView (Svelte 5) e Backend Nativo (Rust / Tauri v2) para a Mesa Espacial e Células",
+  "commands": {
+    "load_board_topology": {
+      "description": "Carrega a topologia declarativa canônica do workspace selecionado",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "workspaceId": { "type": "string" }
+        },
+        "required": ["workspaceId"]
+      },
+      "response": {
+        "type": "object",
+        "properties": {
+          "workspaceId": { "type": "string" },
+          "viewport": {
+            "type": "object",
+            "properties": {
+              "x": { "type": "number" },
+              "y": { "type": "number" },
+              "zoom": { "type": "number" }
+            },
+            "required": ["x", "y", "zoom"]
+          },
+          "nodes": {
+            "type": "array",
+            "items": { "$ref": "#/definitions/CanvasNodeDTO" }
+          },
+          "edges": {
+            "type": "array",
+            "items": { "$ref": "#/definitions/CanvasEdgeDTO" }
+          },
+          "revision": { "type": "integer" },
+          "updatedAt": { "type": "integer" }
+        },
+        "required": ["workspaceId", "viewport", "nodes", "edges", "revision", "updatedAt"]
+      }
+    },
+    "save_board_topology": {
+      "description": "Salva a topologia da Mesa atomicamente no disco com controle OCC",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "workspaceId": { "type": "string" },
+          "topology": { "$ref": "#/definitions/BoardTopologyDTO" },
+          "expectedRevision": { "type": ["integer", "null"] }
+        },
+        "required": ["workspaceId", "topology"]
+      },
+      "response": {
+        "type": "integer",
+        "description": "Novo número de revisão sequencial após a gravação atômica"
+      },
+      "errors": ["RevisionConflict", "DatabaseError", "IoError"]
+    },
+    "save_workspace_cell": {
+      "description": "Persiste canonicamente uma nota de célula no diretório workspaces/<id>/cells/<cell_id>.md",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "workspaceId": { "type": "string" },
+          "cellId": { "type": "string" },
+          "content": { "type": "string" },
+          "frontmatter": { "type": "object" }
+        },
+        "required": ["workspaceId", "cellId", "content"]
+      },
+      "response": {
+        "type": "object",
+        "properties": {
+          "cellId": { "type": "string" },
+          "path": { "type": "string" },
+          "revision": { "type": "integer" }
+        },
+        "required": ["cellId", "path", "revision"]
+      }
+    },
+    "read_workspace_cell": {
+      "description": "Lê o conteúdo em Markdown de uma célula salva no workspace",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "workspaceId": { "type": "string" },
+          "cellId": { "type": "string" }
+        },
+        "required": ["workspaceId", "cellId"]
+      },
+      "response": {
+        "type": "string"
+      },
+      "errors": ["NotFound", "IoError"]
+    }
+  },
+  "definitions": {
+    "CanvasNodeDTO": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "itemId": { "type": ["string", "null"] },
+        "localCellPath": { "type": ["string", "null"] },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "width": { "type": "number" },
+        "height": { "type": "number" },
+        "colorPreset": { "type": ["string", "null"] },
+        "nodeType": { "type": "string" }
+      },
+      "required": ["id", "title", "content", "x", "y", "width", "height"]
+    },
+    "CanvasEdgeDTO": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "sourceNodeId": { "type": "string" },
+        "targetNodeId": { "type": "string" },
+        "fromSide": { "type": "string", "enum": ["Top", "Bottom", "Left", "Right"] },
+        "toSide": { "type": "string", "enum": ["Top", "Bottom", "Left", "Right"] },
+        "label": { "type": ["string", "null"] },
+        "directed": { "type": "boolean" }
+      },
+      "required": ["id", "sourceNodeId", "targetNodeId", "fromSide", "toSide", "directed"]
+    },
+    "BoardTopologyDTO": {
+      "type": "object",
+      "properties": {
+        "workspaceId": { "type": "string" },
+        "viewport": {
+          "type": "object",
+          "properties": {
+            "x": { "type": "number" },
+            "y": { "type": "number" },
+            "zoom": { "type": "number" }
+          },
+          "required": ["x", "y", "zoom"]
+        },
+        "nodes": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/CanvasNodeDTO" }
+        },
+        "edges": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/CanvasEdgeDTO" }
+        },
+        "revision": { "type": "integer" },
+        "updatedAt": { "type": "integer" }
+      },
+      "required": ["workspaceId", "viewport", "nodes", "edges"]
+    }
+  }
+}

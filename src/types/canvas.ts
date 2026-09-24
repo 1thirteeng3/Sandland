@@ -1,4 +1,4 @@
-export type NodeSide = 'left' | 'right' | 'top' | 'bottom';
+export type NodeSide = 'Top' | 'Bottom' | 'Left' | 'Right' | 'top' | 'bottom' | 'left' | 'right';
 
 export interface PositionDTO {
   x: number;
@@ -39,12 +39,21 @@ export interface ViewportStateDTO {
   zoom: number;
 }
 
-export interface CanvasTopologyDTO {
+export interface BoardTopologyDTO {
   workspaceId: string;
   viewport: ViewportStateDTO;
   nodes: CanvasNodeDTO[];
   edges: CanvasEdgeDTO[];
+  revision: number;
   updatedAt: number;
+}
+
+export type CanvasTopologyDTO = BoardTopologyDTO;
+
+export interface CellRecordDTO {
+  cellId: string;
+  path: string;
+  revision: number;
 }
 
 export interface CellDTO {
@@ -57,3 +66,4 @@ export interface CellDTO {
   createdAt: number;
   updatedAt: number;
 }
+

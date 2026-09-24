@@ -117,18 +117,40 @@ function handleBrowserMock<T>(cmd: string, args?: Record<string, unknown>): T {
       const wsId = (args?.workspaceId || "default-workspace") as string;
       const cached = localStorage.getItem(`sandland_topology:${wsId}`);
       if (cached) {
-        return JSON.parse(cached) as T;
+        const parsed = JSON.parse(cached);
+        if (parsed.revision === undefined) parsed.revision = 1;
+        return parsed as T;
       }
       return {
         workspaceId: wsId,
         viewport: { x: 0, y: 0, zoom: 1.0 },
         nodes: [],
         edges: [],
+        revision: 1,
         updatedAt: Math.floor(Date.now() / 1000),
       } as T;
     }
 
-    case "save_board_topology":
+    case "save_board_topology": {
+      const wsId = (args?.workspaceId || "default-workspace") as string;
+      const topo = (args?.topology || {}) as any;
+      const expectedRev = args?.expectedRevision as number | null | undefined;
+      const currentRevStr = localStorage.getItem(`sandland_topology_rev:${wsId}`);
+      const currentRev = currentRevStr ? Number(currentRevStr) : 1;
+
+      if (expectedRev !== undefined && expectedRev !== null && expectedRev !== currentRev) {
+        throw new Error(`RevisionConflict: Conflito de revisão otimista (esperada ${expectedRev}, atual ${currentRev})`);
+      }
+
+      const nextRev = currentRev + 1;
+      topo.revision = nextRev;
+      topo.updatedAt = Math.floor(Date.now() / 1000);
+
+      localStorage.setItem(`sandland_topology:${wsId}`, JSON.stringify(topo));
+      localStorage.setItem(`sandland_topology_rev:${wsId}`, String(nextRev));
+      return nextRev as T;
+    }
+
     case "save_board_topology_fast": {
       const wsId = (args?.workspaceId || "default-workspace") as string;
       const topo = args?.topology;
@@ -136,6 +158,32 @@ function handleBrowserMock<T>(cmd: string, args?: Record<string, unknown>): T {
         localStorage.setItem(`sandland_topology:${wsId}`, JSON.stringify(topo));
       }
       return undefined as T;
+    }
+
+    case "save_workspace_cell": {
+      const wsId = (args?.workspaceId || "default-workspace") as string;
+      const cellId = (args?.cellId || `cell-${Date.now()}`) as string;
+      const content = (args?.content || "") as string;
+      const path = `workspaces/${wsId}/cells/${cellId}.md`;
+
+      const prevRev = Number(localStorage.getItem(`sandland_cell_rev:${cellId}`) || 1);
+      const nextRev = prevRev + 1;
+
+      localStorage.setItem(`sandland_cell:${cellId}`, content);
+      localStorage.setItem(`sandland_cell_rev:${cellId}`, String(nextRev));
+
+      return {
+        cellId,
+        path,
+        revision: nextRev,
+      } as T;
+    }
+
+    case "read_workspace_cell": {
+      const cellId = (args?.cellId || "") as string;
+      const cached = localStorage.getItem(`sandland_cell:${cellId}`);
+      if (cached) return cached as T;
+      return `# Célula ${cellId}\n\nConteúdo local simulado em memória.` as T;
     }
 
     case "create_workspace": {

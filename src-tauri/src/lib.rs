@@ -87,6 +87,8 @@ pub fn run() {
             ipc::workspace::load_board_topology,
             ipc::workspace::save_board_topology,
             ipc::workspace::save_board_topology_fast,
+            ipc::workspace::save_workspace_cell,
+            ipc::workspace::read_workspace_cell,
             ipc::workspace::create_cell,
             ipc::workspace::list_cells,
         ])

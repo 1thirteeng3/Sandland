@@ -44,7 +44,18 @@ pub struct CanvasTopologyDTO {
     pub viewport: ViewportState,
     pub nodes: Vec<CanvasNode>,
     pub edges: Vec<CanvasEdge>,
+    pub revision: u64,
     pub updated_at: i64,
+}
+
+pub type BoardTopologyDTO = CanvasTopologyDTO;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveCellResponseDTO {
+    pub cell_id: String,
+    pub path: String,
+    pub revision: u64,
 }
 
 #[tauri::command]
@@ -92,6 +103,7 @@ pub async fn load_board_topology(
         viewport: topology.viewport,
         nodes: topology.nodes,
         edges: topology.edges,
+        revision: topology.revision,
         updated_at: topology.updated_at,
     })
 }
@@ -122,14 +134,57 @@ pub async fn save_board_topology(
     state: State<'_, AppState>,
     workspace_id: String,
     topology: BoardTopology,
-) -> Result<(), SandlandError> {
+    expected_revision: Option<u64>,
+) -> Result<u64, SandlandError> {
     let guard_opt = state.vault_guard.lock().unwrap();
     let guard = guard_opt.as_ref().ok_or_else(|| {
         SandlandError::DatabaseError("Nenhum cofre aberto".to_string())
     })?;
 
-    CanvasStorage::save_topology(guard, &workspace_id, &topology)?;
-    Ok(())
+    let new_rev = CanvasStorage::save_board_topology(guard, &workspace_id, topology, expected_revision)?;
+    Ok(new_rev)
+}
+
+#[tauri::command]
+pub async fn save_workspace_cell(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    cell_id: String,
+    content: String,
+    frontmatter: Option<serde_json::Value>,
+) -> Result<SaveCellResponseDTO, SandlandError> {
+    let guard_opt = state.vault_guard.lock().unwrap();
+    let guard = guard_opt.as_ref().ok_or_else(|| {
+        SandlandError::DatabaseError("Nenhum cofre aberto".to_string())
+    })?;
+
+    let (path, revision) = CanvasStorage::save_workspace_cell(
+        guard,
+        &workspace_id,
+        &cell_id,
+        &content,
+        frontmatter,
+    )?;
+
+    Ok(SaveCellResponseDTO {
+        cell_id,
+        path,
+        revision,
+    })
+}
+
+#[tauri::command]
+pub async fn read_workspace_cell(
+    state: State<'_, AppState>,
+    workspace_id: String,
+    cell_id: String,
+) -> Result<String, SandlandError> {
+    let guard_opt = state.vault_guard.lock().unwrap();
+    let guard = guard_opt.as_ref().ok_or_else(|| {
+        SandlandError::DatabaseError("Nenhum cofre aberto".to_string())
+    })?;
+
+    CanvasStorage::read_workspace_cell(guard, &workspace_id, &cell_id)
 }
 
 #[tauri::command]
