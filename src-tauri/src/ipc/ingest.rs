@@ -254,6 +254,7 @@ pub async fn promote_to_cell(
         width: 280.0,
         height: 160.0,
         color_preset: Some("blue".to_string()),
+        node_type: Some("note".to_string()),
     };
 
     topology.nodes.push(new_node);
