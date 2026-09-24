@@ -1,0 +1,149 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Editorial Pieces & Provenance IPC Contracts",
+  "description": "Definição formal de contratos de comunicação IPC entre WebView (Svelte 5) e Backend Nativo (Rust / Tauri v2) para Peças Editoriais e Rastreabilidade de Citações",
+  "commands": {
+    "list_workspace_pieces": {
+      "description": "Lista resumos de todas as Peças editoriais existentes no workspace",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "workspaceId": { "type": "string" }
+        },
+        "required": ["workspaceId"]
+      },
+      "response": {
+        "type": "array",
+        "items": { "$ref": "#/definitions/PieceSummaryDTO" }
+      }
+    },
+    "read_workspace_piece": {
+      "description": "Lê o conteúdo completo e catálogo de citações de uma Peça",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "workspaceId": { "type": "string" },
+          "pieceId": { "type": "string" }
+        },
+        "required": ["workspaceId", "pieceId"]
+      },
+      "response": { "$ref": "#/definitions/EditorialPieceDTO" },
+      "errors": ["NotFound", "IoError"]
+    },
+    "save_workspace_piece": {
+      "description": "Persiste atomicamente uma Peça em workspaces/<id>/pieces/<piece_id>.md com frontmatter canônico",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "workspaceId": { "type": "string" },
+          "piece": { "$ref": "#/definitions/EditorialPieceDTO" }
+        },
+        "required": ["workspaceId", "piece"]
+      },
+      "response": {
+        "type": "object",
+        "properties": {
+          "pieceId": { "type": "string" },
+          "path": { "type": "string" },
+          "wordCount": { "type": "integer" },
+          "updatedAt": { "type": "integer" }
+        },
+        "required": ["pieceId", "path", "wordCount", "updatedAt"]
+      },
+      "errors": ["DatabaseError", "IoError", "InvalidInput"]
+    },
+    "check_piece_citations_drift": {
+      "description": "Audita o estado de divergência (drift) entre as citações da Peça e o estado atual das células no disco",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "workspaceId": { "type": "string" },
+          "pieceId": { "type": "string" }
+        },
+        "required": ["workspaceId", "pieceId"]
+      },
+      "response": {
+        "type": "array",
+        "items": { "$ref": "#/definitions/CitationDriftItemDTO" }
+      }
+    },
+    "compile_piece_export": {
+      "description": "Compila e formata a Peça para exportação em Markdown puro com apêndice de referências",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "workspaceId": { "type": "string" },
+          "pieceId": { "type": "string" },
+          "includeReferences": { "type": "boolean" }
+        },
+        "required": ["workspaceId", "pieceId"]
+      },
+      "response": {
+        "type": "string"
+      }
+    }
+  },
+  "definitions": {
+    "CitationRecordDTO": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "sourceCellId": { "type": "string" },
+        "sourceRevision": { "type": "integer" },
+        "sourceTitle": { "type": "string" },
+        "sourceAssetHash": { "type": ["string", "null"] },
+        "quote": { "type": "string" },
+        "quoteHash": { "type": "string" },
+        "insertedAt": { "type": "integer" }
+      },
+      "required": ["id", "sourceCellId", "sourceRevision", "sourceTitle", "quote", "quoteHash", "insertedAt"]
+    },
+    "EditorialPieceDTO": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "workspaceId": { "type": "string" },
+        "title": { "type": "string" },
+        "slug": { "type": "string" },
+        "body": { "type": "string" },
+        "citations": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/CitationRecordDTO" }
+        },
+        "wordCount": { "type": "integer" },
+        "createdAt": { "type": "integer" },
+        "updatedAt": { "type": "integer" }
+      },
+      "required": ["id", "workspaceId", "title", "body", "citations"]
+    },
+    "PieceSummaryDTO": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "workspaceId": { "type": "string" },
+        "title": { "type": "string" },
+        "slug": { "type": "string" },
+        "citationCount": { "type": "integer" },
+        "wordCount": { "type": "integer" },
+        "updatedAt": { "type": "integer" }
+      },
+      "required": ["id", "workspaceId", "title", "slug", "citationCount", "wordCount", "updatedAt"]
+    },
+    "CitationDriftItemDTO": {
+      "type": "object",
+      "properties": {
+        "citationId": { "type": "string" },
+        "sourceCellId": { "type": "string" },
+        "status": {
+          "type": "string",
+          "enum": ["Synchronized", "Diverged", "Orphaned"]
+        },
+        "citedRevision": { "type": "integer" },
+        "currentRevision": { "type": ["integer", "null"] },
+        "currentTitle": { "type": ["string", "null"] },
+        "currentSnippet": { "type": ["string", "null"] }
+      },
+      "required": ["citationId", "sourceCellId", "status", "citedRevision"]
+    }
+  }
+}
