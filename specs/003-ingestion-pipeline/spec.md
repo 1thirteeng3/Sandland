@@ -79,10 +79,12 @@ Como pesquisador, quero colar uma URL no campo de captura para que o conteúdo t
 
 ### Edge Cases
 
-- **Queda de energia ou fechamento durante a cópia**: O protocolo de escrita atômica em duas fases garante que arquivos incompletos nunca sejam deixados como notas válidas.
-- **Arquivos corrompidos ou com encoding inválido**: O ingestor tenta UTF-8 com fallback para perda segura de caracteres inválidos, notificando o usuário sem travar a aplicação.
-- **Carregamento de notas muito grandes (> 10 MB)**: O sistema ingere o arquivo físico, mas trunca o preview da listagem para as primeiras 5.000 palavras, mantendo a performance da interface.
-- **Navegação em Modo Web Simulado (Browser)**: No browser puro (`localhost:1420`), o pipeline de ingestão utiliza `localStorage` e mock local, informando o usuário via banner sem disparar exceções não tratadas.
+- **Queda de energia ou fechamento abrupto durante a cópia**: O protocolo de escrita atômica em duas fases garante que arquivos temporários sejam sincronizados com o disco via `fsync` / `FlushFileBuffers` antes da substituição atômica (`rename`), assegurando que arquivos incompletos nunca sejam deixados como notas válidas.
+- **Arquivos corrompidos ou com encoding inválido**: O ingestor tenta decodificar como UTF-8 com fallback gracioso (`lossy`) para evitar perda de dados, notificando o usuário sem travar a aplicação; arquivos sem frontmatter legível recebem o nome do arquivo como título padrão e são sinalizados com `needs_manual_review = true`.
+- **Esgotamento de espaço em disco (ENOSPC)**: Caso o disco atinja a capacidade máxima durante a gravação de uma nota física ou ativo CAS, o arquivo temporário é purgado imediatamente, nenhuma entrada parcial é persistida no `index.db` e o sistema retorna erro tipado `IoError("Espaço em disco insuficiente")`.
+- **Conflito de nomes de arquivo**: Caso um arquivo com o mesmo nome já exista em `ingest/notes/`, o sistema aplica uma resolução determinística de sufixo no formato `<stem>_<counter>.<ext>` (ex: `pesquisa_1.md`), garantindo preservação de todas as fontes sem sobrescrita involuntária.
+- **Carregamento de notas muito grandes (> 10 MB)**: O sistema ingere o arquivo físico integralmente, mas trunca o preview da listagem para as primeiras 5.000 palavras, mantendo a performance da interface.
+- **Navegação em Modo Web Simulado (Browser)**: No browser puro (`localhost:1420`), o pipeline de ingestão utiliza `localStorage` e mock local seguro com limites de armazenamento, informando o usuário via banner sem enfraquecer os requisitos de segurança do desktop.
 
 ---
 
@@ -90,13 +92,17 @@ Como pesquisador, quero colar uma URL no campo de captura para que o conteúdo t
 
 ### Functional Requirements
 
-- **FR-001**: O sistema DEVE gravar notas de texto e Markdown no diretório canônico `<vault_root>/ingest/notes/` sem alterar os bytes originais da fonte primária.
-- **FR-002**: O sistema DEVE persistir os metadados de cada item ingerido na tabela `ingested_items` do SQLite (`index.db`), incluindo `id`, `source_type`, `canonical_path`, `title`, `summary`, `word_count`, `created_at` e `status`.
+- **FR-001**: O sistema DEVE gravar notas de texto e Markdown no diretório canônico `<vault_root>/ingest/notes/` sem alterar os bytes originais da fonte primária. O I/O DEVE operar sob contenção de `VaultGuard` (resolução anti-TOCTOU de caminhos relativos ao cofre), rejeitando sumariamente caracteres nulos (`\0`), caracteres de controle, dispositivos reservados do SO (`CON`, `PRN`, `AUX`, `NUL`, `COM1-9`, `LPT1-9`) e links simbólicos/junções externos. Toda operação de parsing e indexação DEVE operar 100% local com isolamento de rede (`deny network-outbound`).
+- **FR-002**: O sistema DEVE persistir os metadados de cada item ingerido na tabela `ingested_items` do SQLite (`index.db`), incluindo `id`, `source_type`, `canonical_uri`, `source_path`, `title`, `summary`, `word_count`, `created_at` e `status`. As transações no SQLite DEVEM operar em modo WAL (`Write-Ahead Logging`) com rollback automático em caso de falha e timeout de espera de 5 segundos para rajadas de concorrência.
 - **FR-003**: O sistema DEVE fornecer busca de texto completo (FTS5) sobre o título e conteúdo das notas indexadas no `index.db`.
-- **FR-004**: O sistema DEVE armazenar imagens e arquivos binários no Content-Addressable Storage (`assets/<sha256>.<ext>`), indexando o hash para evitar redundância em disco.
-- **FR-005**: Ao transferir ou promover um item do Acervo para a Mesa Espacial (Canvas), o sistema DEVE clonar o conteúdo de forma desacoplada (Fork-on-Insert) com citação de proveniência (`source_path`, `source_hash`).
-- **FR-006**: O sistema DEVE validar URLs fornecidas pelo usuário contra SSRF, bloqueando endereços de loopback (`127.0.0.1`, `localhost`) e faixas de rede privada (RFC 1918) antes da extração web.
-- **FR-007**: O sistema DEVE expor comandos IPC tipados no Tauri v2 (`ingest_file`, `ingest_file_content`, `ingest_url`, `list_ingested_items`, `promote_to_cell`) com tratamento seguro de erros.
+- **FR-004**: O sistema DEVE armazenar imagens e arquivos binários no Content-Addressable Storage (`assets/<sha256>.<ext>`) em modo estritamente append-only e imutável (write-once). Apenas extensões de mídia permitidas (`png`, `jpg`, `jpeg`, `webp`, `gif`, `svg`) são aceitas, rejeitando sumariamente binários executáveis (`.exe`, `.dll`, `.sh`, `.bat`). Na leitura de ativos, o sistema DEVE permitir a validação criptográfica do hash SHA-256 para prevenir bitrot silencioso.
+- **FR-005**: Ao transferir ou promover um item do Acervo para a Mesa Espacial (Canvas), o sistema DEVE clonar o conteúdo de forma desacoplada (Fork-on-Insert) com citação de proveniência (`source_path`, `source_hash`, `item_id`). Mutações editoriais subsequentes na célula do Canvas NUNCA alteram a nota original em `ingest/notes/`.
+- **FR-006**: O sistema DEVE validar URLs fornecidas pelo usuário contra SSRF antes da extração web:
+  - Whitelist restrita a esquemas `http` e `https` (rejeitando `file:`, `ftp:`, `gopher:`, `data:`).
+  - Bloqueio sumário de loopback IPv4 (`127.0.0.0/8`, `localhost`), loopback IPv6 (`::1`), IPv4-mapped IPv6 (`::ffff:127.0.0.1`), faixas privadas RFC 1918 (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) e endereços link-local (`169.254.0.0/16`, `fe80::/10`).
+  - Mitigação contra DNS Rebinding através da resolução de hostname e validação de todos os IPs de socket antes da conexão.
+  - Limite de timeout de conexão de 10 segundos, payload máximo de 5 MB e no máximo 3 redirecionamentos HTTP (cada um sujeito à revalidação anti-SSRF).
+- **FR-007**: O sistema DEVE expor comandos IPC tipados no Tauri v2 (`ingest_file`, `ingest_file_content`, `ingest_url`, `list_ingested_items`, `promote_to_cell`) com respostas de erro estruturadas e tipadas (`SecurityError::SsrfBlocked`, `IoError`, `NotFound`, `InvalidInput`).
 
 ### Key Entities
 
@@ -112,7 +118,7 @@ Como pesquisador, quero colar uma URL no campo de captura para que o conteúdo t
 
 - **SC-001**: O tempo total de ingestão, cópia física para o disco e indexação no SQLite para um arquivo Markdown de até 1 MB DEVE ser inferior a 80 milissegundos.
 - **SC-002**: A adição de um item do Acervo como novo nó na Mesa Espacial DEVE ocorrer em menos de 16 milissegundos (60 FPS contínuos).
-- **SC-003**: 100% dos arquivos ingeridos DEVEM ser reconstruíveis a frio no `index.db` após a exclusão acidental do arquivo de banco de dados (`index.db`), sem perda de texto ou ativos.
+- **SC-003**: 100% dos arquivos ingeridos DEVEM ser reconstruíveis a frio no `index.db` após a exclusão acidental do arquivo de banco de dados (`index.db`), sem perda de texto ou ativos, com taxa de reidratação de pelo menos 1.000 notas/segundo em discos SSD/NVMe.
 - **SC-004**: Deduplicação de imagens idênticas DEVE alcançar 100% de reaproveitamento de armazenamento CAS sem duplicação de arquivos no disco.
 
 ---
@@ -123,3 +129,5 @@ Como pesquisador, quero colar uma URL no campo de captura para que o conteúdo t
 - Os arquivos Markdown de notas padrão variam entre 1 KB e 5 MB.
 - A extração web básica opera offline com fallback gracioso quando a rede não estiver disponível.
 - A autoridade canônica dos dados reside nos arquivos do cofre (`ingest/` e `assets/`), sendo o SQLite estritamente derivado e recriável.
+- Todo processamento de texto e parsing de frontmatter ocorre estritamente local (`deny network-outbound`).
+
