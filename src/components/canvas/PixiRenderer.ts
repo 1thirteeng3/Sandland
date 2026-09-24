@@ -2,13 +2,22 @@ import { Application, Container, Graphics, Text, TextStyle } from 'pixi.js';
 import type { CanvasNodeDTO, NodeSide } from '../../types/canvas';
 import { canvasStore } from '../../stores/canvas.svelte';
 
+interface NodeGraphicsItem {
+  container: Container;
+  bg: Graphics;
+  titleText: Text;
+  contentText: Text;
+  portsContainer: Container;
+}
+
 export class PixiRenderer {
   private app: Application;
   private containerElement: HTMLElement;
   private worldContainer: Container;
   private edgesGraphics: Graphics;
+  private previewGraphics: Graphics;
   private nodesContainer: Container;
-  private nodeGraphicsMap: Map<string, { container: Container; bg: Graphics; titleText: Text; contentText: Text }> = new Map();
+  private nodeGraphicsMap: Map<string, NodeGraphicsItem> = new Map();
 
   private isDraggingNode = false;
   private draggedNodeId: string | null = null;
@@ -17,11 +26,18 @@ export class PixiRenderer {
   private lastPointer = { x: 0, y: 0 };
   private isSpacePressed = false;
 
+  // Drag-and-connect state (T015)
+  private isConnecting = false;
+  private connectSourceNodeId: string | null = null;
+  private connectFromSide: NodeSide | null = null;
+  private connectPointerPos = { x: 0, y: 0 };
+
   constructor(container: HTMLElement) {
     this.containerElement = container;
     this.app = new Application();
     this.worldContainer = new Container();
     this.edgesGraphics = new Graphics();
+    this.previewGraphics = new Graphics();
     this.nodesContainer = new Container();
   }
 
@@ -44,6 +60,7 @@ export class PixiRenderer {
     this.containerElement.appendChild(this.app.canvas);
 
     this.worldContainer.addChild(this.edgesGraphics);
+    this.worldContainer.addChild(this.previewGraphics);
     this.worldContainer.addChild(this.nodesContainer);
     this.app.stage.addChild(this.worldContainer);
 
@@ -67,27 +84,34 @@ export class PixiRenderer {
       }
     });
 
-    // Pan do canvas com botão do meio ou arrasto de fundo com botão esquerdo
+    // Pan do canvas ou desseleção
     canvas.addEventListener('pointerdown', (e) => {
-      if (!this.isDraggingNode) {
+      if (!this.isDraggingNode && !this.isConnecting) {
         if (e.button === 1 || e.button === 0 || this.isSpacePressed) {
           this.isPanning = true;
           this.lastPointer = { x: e.clientX, y: e.clientY };
           if (this.isSpacePressed) {
             canvas.style.cursor = 'grabbing';
+          } else {
+            // Desseleciona se clicou no fundo
+            canvasStore.selectedNodeId = null;
+            canvasStore.selectEdge(null);
           }
         }
       }
     });
 
     window.addEventListener('pointermove', (e) => {
-      if (this.isDraggingNode && this.draggedNodeId) {
-        const rect = this.containerElement.getBoundingClientRect();
-        const screenX = e.clientX - rect.left;
-        const screenY = e.clientY - rect.top;
-        const worldX = (screenX - canvasStore.viewport.x) / canvasStore.viewport.zoom;
-        const worldY = (screenY - canvasStore.viewport.y) / canvasStore.viewport.zoom;
+      const rect = this.containerElement.getBoundingClientRect();
+      const screenX = e.clientX - rect.left;
+      const screenY = e.clientY - rect.top;
+      const worldX = (screenX - canvasStore.viewport.x) / canvasStore.viewport.zoom;
+      const worldY = (screenY - canvasStore.viewport.y) / canvasStore.viewport.zoom;
 
+      if (this.isConnecting) {
+        this.connectPointerPos = { x: worldX, y: worldY };
+        this.renderPreviewEdge();
+      } else if (this.isDraggingNode && this.draggedNodeId) {
         const newX = worldX - this.dragOffset.x;
         const newY = worldY - this.dragOffset.y;
 
@@ -103,7 +127,11 @@ export class PixiRenderer {
       }
     });
 
-    window.addEventListener('pointerup', () => {
+    window.addEventListener('pointerup', (e) => {
+      if (this.isConnecting) {
+        this.finishConnecting(e);
+      }
+
       if (this.isDraggingNode) {
         this.isDraggingNode = false;
         this.draggedNodeId = null;
@@ -169,7 +197,7 @@ export class PixiRenderer {
     }
   }
 
-  private createNodeGraphics(node: CanvasNodeDTO) {
+  private createNodeGraphics(node: CanvasNodeDTO): NodeGraphicsItem {
     const nodeContainer = new Container();
     nodeContainer.eventMode = 'static';
     nodeContainer.cursor = 'grab';
@@ -178,7 +206,7 @@ export class PixiRenderer {
     nodeContainer.addChild(bg);
 
     const titleStyle = new TextStyle({
-      fontFamily: 'Inter, sans-serif',
+      fontFamily: 'Inter, -apple-system, sans-serif',
       fontSize: 14,
       fontWeight: 'bold',
       fill: '#f0f3f8',
@@ -190,7 +218,7 @@ export class PixiRenderer {
     nodeContainer.addChild(titleText);
 
     const contentStyle = new TextStyle({
-      fontFamily: 'Inter, sans-serif',
+      fontFamily: 'Inter, -apple-system, sans-serif',
       fontSize: 11,
       fill: '#9da7b8',
       wordWrap: true,
@@ -200,11 +228,27 @@ export class PixiRenderer {
     contentText.position.set(12, 40);
     nodeContainer.addChild(contentText);
 
-    // Node Interaction
+    // Container de portas de ancoragem (T014)
+    const portsContainer = new Container();
+    nodeContainer.addChild(portsContainer);
+
+    // Interações de clique e arraste no cartão
+    let lastClickTime = 0;
     nodeContainer.on('pointerdown', (e) => {
       e.stopPropagation();
       this.isPanning = false;
+
+      // Duplo clique abre o editor overlay imediatamente (T012)
+      const now = Date.now();
+      if (now - lastClickTime < 300) {
+        canvasStore.startEditing(node.id);
+        lastClickTime = 0;
+        return;
+      }
+      lastClickTime = now;
+
       canvasStore.selectedNodeId = node.id;
+      canvasStore.selectEdge(null);
       this.isDraggingNode = true;
       this.draggedNodeId = node.id;
 
@@ -220,23 +264,10 @@ export class PixiRenderer {
       };
     });
 
-    // Duplo clique projeta o overlay DOM de edição de texto em Svelte 5 (T039)
-    let lastClickTime = 0;
-    nodeContainer.on('pointerup', () => {
-      const now = Date.now();
-      if (now - lastClickTime < 300) {
-        canvasStore.startEditing(node.id);
-      }
-      lastClickTime = now;
-    });
-
-    return { container: nodeContainer, bg, titleText, contentText };
+    return { container: nodeContainer, bg, titleText, contentText, portsContainer };
   }
 
-  private updateNodeGraphics(
-    item: { container: Container; bg: Graphics; titleText: Text; contentText: Text },
-    node: CanvasNodeDTO
-  ) {
+  private updateNodeGraphics(item: NodeGraphicsItem, node: CanvasNodeDTO) {
     item.container.position.set(node.x, node.y);
 
     const isSelected = canvasStore.selectedNodeId === node.id;
@@ -249,15 +280,151 @@ export class PixiRenderer {
     item.titleText.text = node.title || 'Sem Título';
     item.contentText.text = node.content || '';
 
+    // Renderiza fundo do nó
     item.bg.clear();
     item.bg.roundRect(0, 0, node.width, node.height, 8);
     item.bg.fill({ color: 0x16191f, alpha: 0.95 });
     item.bg.stroke({
-      color: isSelected ? 0x3b82f6 : 0x2d3442,
+      color: isSelected ? 0x3b82f6 : 0x272d3a,
       width: isSelected ? 2 : 1,
     });
+
+    // Renderiza portas magnéticas (T014)
+    this.renderAnchorPorts(item.portsContainer, node, isSelected);
   }
 
+  // T014: Renderiza as 4 alças magnéticas (Top, Bottom, Left, Right)
+  private renderAnchorPorts(container: Container, node: CanvasNodeDTO, isSelected: boolean) {
+    container.removeChildren();
+
+    const sides: NodeSide[] = ['Top', 'Right', 'Bottom', 'Left'];
+    for (const side of sides) {
+      const pos = this.getAnchorLocalPosition(node, side);
+      const portG = new Graphics();
+      portG.eventMode = 'static';
+      portG.cursor = 'crosshair';
+
+      // Ponto de âncora
+      portG.circle(pos.x, pos.y, isSelected ? 5 : 4);
+      portG.fill({ color: isSelected ? 0x60a5fa : 0x3b82f6, alpha: isSelected ? 0.9 : 0.6 });
+      portG.stroke({ color: 0xffffff, width: 1.5, alpha: 0.8 });
+
+      // Inicia drag-and-connect da alça (T015)
+      portG.on('pointerdown', (e) => {
+        e.stopPropagation();
+        this.isConnecting = true;
+        this.connectSourceNodeId = node.id;
+        this.connectFromSide = side;
+
+        const rect = this.containerElement.getBoundingClientRect();
+        const screenX = e.clientX - rect.left;
+        const screenY = e.clientY - rect.top;
+        this.connectPointerPos = {
+          x: (screenX - canvasStore.viewport.x) / canvasStore.viewport.zoom,
+          y: (screenY - canvasStore.viewport.y) / canvasStore.viewport.zoom,
+        };
+      });
+
+      container.addChild(portG);
+    }
+  }
+
+  // Finaliza a conexão magnética (T015)
+  private finishConnecting(e: PointerEvent) {
+    if (!this.connectSourceNodeId || !this.connectFromSide) {
+      this.isConnecting = false;
+      this.previewGraphics.clear();
+      return;
+    }
+
+    const rect = this.containerElement.getBoundingClientRect();
+    const screenX = e.clientX - rect.left;
+    const screenY = e.clientY - rect.top;
+    const worldX = (screenX - canvasStore.viewport.x) / canvasStore.viewport.zoom;
+    const worldY = (screenY - canvasStore.viewport.y) / canvasStore.viewport.zoom;
+
+    // Procura o nó destino sobre o qual o mouse foi solto
+    let targetNode: CanvasNodeDTO | null = null;
+    for (const node of canvasStore.nodes) {
+      if (node.id === this.connectSourceNodeId) continue; // Rejeição de auto-loop
+      if (
+        worldX >= node.x &&
+        worldX <= node.x + node.width &&
+        worldY >= node.y &&
+        worldY <= node.y + node.height
+      ) {
+        targetNode = node;
+        break;
+      }
+    }
+
+    if (targetNode) {
+      // Determina a porta destino mais próxima do ponto de soltura
+      const toSide = this.findClosestSide(targetNode, worldX, worldY);
+      canvasStore.createEdge(
+        this.connectSourceNodeId,
+        targetNode.id,
+        this.connectFromSide,
+        toSide
+      );
+    }
+
+    this.isConnecting = false;
+    this.connectSourceNodeId = null;
+    this.connectFromSide = null;
+    this.previewGraphics.clear();
+    this.renderEdges();
+  }
+
+  private findClosestSide(node: CanvasNodeDTO, x: number, y: number): NodeSide {
+    const sides: NodeSide[] = ['Top', 'Bottom', 'Left', 'Right'];
+    let bestSide: NodeSide = 'Left';
+    let bestDist = Infinity;
+
+    for (const side of sides) {
+      const pos = this.getAnchorPosition(node, side);
+      const dx = pos.x - x;
+      const dy = pos.y - y;
+      const dist = dx * dx + dy * dy;
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestSide = side;
+      }
+    }
+
+    return bestSide;
+  }
+
+  // T015: Renderiza a linha elástica de preview durante a criação de conexão
+  private renderPreviewEdge() {
+    this.previewGraphics.clear();
+    if (!this.isConnecting || !this.connectSourceNodeId || !this.connectFromSide) return;
+
+    const sourceNode = canvasStore.nodes.find((n) => n.id === this.connectSourceNodeId);
+    if (!sourceNode) return;
+
+    const start = this.getAnchorPosition(sourceNode, this.connectFromSide);
+    const end = this.connectPointerPos;
+
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const handleOffset = Math.min(Math.max(dist * 0.4, 30), 140);
+
+    const cp1 = this.getControlPoint(start, this.connectFromSide, handleOffset);
+
+    this.previewGraphics.stroke({ color: 0x60a5fa, width: 2, alpha: 0.9 });
+    this.previewGraphics.moveTo(start.x, start.y);
+    this.previewGraphics.bezierCurveTo(cp1.x, cp1.y, end.x, end.y, end.x, end.y);
+
+    this.previewGraphics.circle(start.x, start.y, 4);
+    this.previewGraphics.fill({ color: 0x3b82f6 });
+
+    this.previewGraphics.circle(end.x, end.y, 5);
+    this.previewGraphics.fill({ color: 0x60a5fa });
+  }
+
+  // T016: Renderização de Arestas Bézier cúbicas e setas direcionais
   private renderEdges() {
     this.edgesGraphics.clear();
     const edges = canvasStore.edges;
@@ -268,10 +435,10 @@ export class PixiRenderer {
       const target = nodeMap.get(edge.targetNodeId);
       if (!source || !target) continue;
 
+      const isSelected = canvasStore.selectedEdgeId === edge.id;
       const start = this.getAnchorPosition(source, edge.fromSide);
       const end = this.getAnchorPosition(target, edge.toSide);
 
-      // Curva de Bézier cúbica suave entre âncoras
       const dx = end.x - start.x;
       const dy = end.y - start.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
@@ -280,7 +447,11 @@ export class PixiRenderer {
       const cp1 = this.getControlPoint(start, edge.fromSide, handleOffset);
       const cp2 = this.getControlPoint(end, edge.toSide, handleOffset);
 
-      this.edgesGraphics.stroke({ color: 0x5271ff, width: 2, alpha: 0.8 });
+      // Traçado da curva
+      const edgeColor = isSelected ? 0x60a5fa : 0x5271ff;
+      const edgeWidth = isSelected ? 3 : 2;
+
+      this.edgesGraphics.stroke({ color: edgeColor, width: edgeWidth, alpha: isSelected ? 1 : 0.85 });
       this.edgesGraphics.moveTo(start.x, start.y);
       this.edgesGraphics.bezierCurveTo(cp1.x, cp1.y, cp2.x, cp2.y, end.x, end.y);
 
@@ -290,27 +461,59 @@ export class PixiRenderer {
 
       // Seta direcional na âncora de destino
       if (edge.directed) {
-        this.edgesGraphics.circle(end.x, end.y, 4);
-        this.edgesGraphics.fill({ color: 0x5271ff });
+        this.renderDirectionalArrow(end, edge.toSide, edgeColor);
       }
     }
   }
 
-  private getAnchorPosition(node: CanvasNodeDTO, side: NodeSide) {
-    switch (side) {
+  private renderDirectionalArrow(pos: { x: number; y: number }, side: NodeSide, color: number) {
+    const s = side.toLowerCase();
+    const arrowSize = 8;
+    let angle = 0;
+
+    if (s === 'left') angle = 0; // Apontando para a direita (entrando pelo lado esquerdo)
+    else if (s === 'right') angle = Math.PI; // Apontando para a esquerda
+    else if (s === 'top') angle = Math.PI / 2; // Apontando para baixo
+    else if (s === 'bottom') angle = -Math.PI / 2; // Apontando para cima
+
+    const tipX = pos.x;
+    const tipY = pos.y;
+    const leftX = tipX - arrowSize * Math.cos(angle - Math.PI / 6);
+    const leftY = tipY - arrowSize * Math.sin(angle - Math.PI / 6);
+    const rightX = tipX - arrowSize * Math.cos(angle + Math.PI / 6);
+    const rightY = tipY - arrowSize * Math.sin(angle + Math.PI / 6);
+
+    this.edgesGraphics.moveTo(tipX, tipY);
+    this.edgesGraphics.lineTo(leftX, leftY);
+    this.edgesGraphics.lineTo(rightX, rightY);
+    this.edgesGraphics.closePath();
+    this.edgesGraphics.fill({ color });
+  }
+
+  private getAnchorLocalPosition(node: CanvasNodeDTO, side: NodeSide) {
+    const s = side.toLowerCase();
+    switch (s) {
       case 'left':
-        return { x: node.x, y: node.y + node.height / 2 };
+        return { x: 0, y: node.height / 2 };
       case 'right':
-        return { x: node.x + node.width, y: node.y + node.height / 2 };
+        return { x: node.width, y: node.height / 2 };
       case 'top':
-        return { x: node.x + node.width / 2, y: node.y };
+        return { x: node.width / 2, y: 0 };
       case 'bottom':
-        return { x: node.x + node.width / 2, y: node.y + node.height };
+        return { x: node.width / 2, y: node.height };
+      default:
+        return { x: 0, y: 0 };
     }
   }
 
+  private getAnchorPosition(node: CanvasNodeDTO, side: NodeSide) {
+    const local = this.getAnchorLocalPosition(node, side);
+    return { x: node.x + local.x, y: node.y + local.y };
+  }
+
   private getControlPoint(pos: { x: number; y: number }, side: NodeSide, offset: number) {
-    switch (side) {
+    const s = side.toLowerCase();
+    switch (s) {
       case 'left':
         return { x: pos.x - offset, y: pos.y };
       case 'right':
@@ -319,15 +522,17 @@ export class PixiRenderer {
         return { x: pos.x, y: pos.y - offset };
       case 'bottom':
         return { x: pos.x, y: pos.y + offset };
+      default:
+        return { x: pos.x, y: pos.y };
     }
   }
 
-  // T042: Frustum Culling & T043: 3-stage Level of Detail (LOD)
+  // T024: Frustum Culling AABB & T025: Level of Detail (LOD) a 60 FPS
   public applyLODAndCulling() {
     const zoom = canvasStore.viewport.zoom;
     const { width, height } = this.app.screen;
 
-    // Converte os limites da tela para coordenadas do mundo
+    // Viewport AABB em coordenadas do mundo
     const worldLeft = -canvasStore.viewport.x / zoom;
     const worldTop = -canvasStore.viewport.y / zoom;
     const worldRight = (width - canvasStore.viewport.x) / zoom;
@@ -337,7 +542,7 @@ export class PixiRenderer {
       const node = canvasStore.nodes.find((n) => n.id === id);
       if (!node) continue;
 
-      // 1. Frustum Culling
+      // 1. Frustum Culling AABB (T024)
       const isVisible =
         node.x + node.width >= worldLeft &&
         node.x <= worldRight &&
@@ -347,19 +552,22 @@ export class PixiRenderer {
       item.container.visible = isVisible;
       if (!isVisible) continue;
 
-      // 2. 3-Stage LOD
-      if (zoom > 0.6) {
+      // 2. 3-Stage LOD (T025)
+      if (zoom >= 0.8) {
         // LOD Alto: Renderiza título e texto completo
         item.titleText.visible = canvasStore.editingNodeId !== id;
         item.contentText.visible = canvasStore.editingNodeId !== id;
-      } else if (zoom >= 0.3) {
+        item.portsContainer.visible = true;
+      } else if (zoom >= 0.35) {
         // LOD Médio: Renderiza apenas título
         item.titleText.visible = true;
         item.contentText.visible = false;
+        item.portsContainer.visible = false;
       } else {
-        // LOD Baixo: Proxy card sólido simplificado (sem textos para maximizar draw calls)
+        // LOD Macro: Proxy card sólido simplificado sem texto para maximizar performance
         item.titleText.visible = false;
         item.contentText.visible = false;
+        item.portsContainer.visible = false;
       }
     }
   }

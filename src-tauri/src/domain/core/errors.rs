@@ -139,6 +139,9 @@ pub enum SandlandError {
     #[error("Item não encontrado: {0}")]
     NotFound(String),
 
+    #[error("Conflito de revisão otimista: esperada {expected:?}, encontrada {actual}")]
+    RevisionConflict { expected: Option<u64>, actual: u64 },
+
     #[error("Entrada inválida fornecida: {0}")]
     InvalidInput(String),
 }

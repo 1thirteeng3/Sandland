@@ -7,8 +7,8 @@
 
 **Purpose**: Estruturação inicial de tipos, diretórios canônicos e contratos para a Mesa Espacial
 
-- [ ] T001 [P] Ensure canonical workspace directories tree (`workspaces/<id>/`, `workspaces/<id>/cells/`) in `src-tauri/src/infra/fs/vault.rs`
-- [ ] T002 [P] Define TypeScript DTOs matching `contracts/canvas-ipc.json` (`CanvasNodeDTO`, `CanvasEdgeDTO`, `BoardTopologyDTO`, `NodeSide`) in `src/types/canvas.ts`
+- [X] T001 [P] Ensure canonical workspace directories tree (`workspaces/<id>/`, `workspaces/<id>/cells/`) in `src-tauri/src/infra/fs/vault.rs`
+- [X] T002 [P] Define TypeScript DTOs matching `contracts/canvas-ipc.json` (`CanvasNodeDTO`, `CanvasEdgeDTO`, `BoardTopologyDTO`, `NodeSide`) in `src/types/canvas.ts`
 
 ---
 
@@ -18,11 +18,11 @@
 
 **⚠️ CRITICAL**: Nenhuma estória de usuário pode ser iniciada antes da conclusão desta fase.
 
-- [ ] T003 [P] Implement domain entities `BoardTopology`, `CanvasNode`, `CanvasEdge`, and `NodeSide` enum in `src-tauri/src/domain/workspace/topology.rs`
-- [ ] T004 [P] Implement `WorkspaceCell` entity with YAML frontmatter serialization in `src-tauri/src/domain/workspace/cell.rs`
-- [ ] T005 Implement atomic two-phase write and read for `board.canvas.json` and `cells/*.md` with OCC revision check in `src-tauri/src/infra/fs/canvas_io.rs`
-- [ ] T006 Expose Tauri IPC commands `load_board_topology`, `save_board_topology`, `save_workspace_cell`, and `read_workspace_cell` in `src-tauri/src/ipc/workspace.rs` and register in `src-tauri/src/lib.rs`
-- [ ] T007 [P] Implement typed client IPC methods (`loadBoardTopology`, `saveBoardTopology`, `saveWorkspaceCell`, `readWorkspaceCell`) in `src/services/canvasService.ts`
+- [X] T003 [P] Implement domain entities `BoardTopology`, `CanvasNode`, `CanvasEdge`, and `NodeSide` enum in `src-tauri/src/domain/workspace/topology.rs`
+- [X] T004 [P] Implement `WorkspaceCell` entity with YAML frontmatter serialization in `src-tauri/src/domain/workspace/cell.rs`
+- [X] T005 Implement atomic two-phase write and read for `board.canvas.json` and `cells/*.md` with OCC revision check in `src-tauri/src/infra/fs/canvas_io.rs`
+- [X] T006 Expose Tauri IPC commands `load_board_topology`, `save_board_topology`, `save_workspace_cell`, and `read_workspace_cell` in `src-tauri/src/ipc/workspace.rs` and register in `src-tauri/src/lib.rs`
+- [X] T007 [P] Implement typed client IPC methods (`loadBoardTopology`, `saveBoardTopology`, `saveWorkspaceCell`, `readWorkspaceCell`) in `src/services/canvasService.ts`
 
 **Checkpoint**: Fundação pronta - a implementação das estórias de usuário pode iniciar em paralelo.
 
@@ -36,14 +36,14 @@
 
 ### Tests for User Story 1
 
-- [ ] T008 [P] [US1] Create integration test for cell markdown persistence and frontmatter round-trip in `tests/cell_markdown_tests.rs`
+- [X] T008 [P] [US1] Create integration test for cell markdown persistence and frontmatter round-trip in `tests/cell_markdown_tests.rs`
 
 ### Implementation for User Story 1
 
-- [ ] T009 [US1] Update `src/stores/canvas.svelte.ts` to manage active editing node state (`editingNodeId`, `editingContent`, `editingBounds`) with 400ms autosave debounce
-- [ ] T010 [US1] Implement dynamic overlay editor component with keyboard shortcuts (`Esc` to blur, `Cmd/Ctrl+Enter` to commit) in `src/components/canvas/CellOverlay.svelte`
-- [ ] T011 [US1] Integrate `CellOverlay.svelte` over `src/components/canvas/CanvasViewport.svelte` with synchronized screen-coordinate transformation
-- [ ] T012 [US1] Wire double-click and Enter key triggers on nodes in `src/components/canvas/PixiRenderer.ts` to open the overlay editor
+- [X] T009 [US1] Update `src/stores/canvas.svelte.ts` to manage active editing node state (`editingNodeId`, `editingContent`, `editingBounds`) with 400ms autosave debounce
+- [X] T010 [US1] Implement dynamic overlay editor component with keyboard shortcuts (`Esc` to blur, `Cmd/Ctrl+Enter` to commit) in `src/components/canvas/CellOverlay.svelte`
+- [X] T011 [US1] Integrate `CellOverlay.svelte` over `src/components/canvas/CanvasViewport.svelte` with synchronized screen-coordinate transformation
+- [X] T012 [US1] Wire double-click and Enter key triggers on nodes in `src/components/canvas/PixiRenderer.ts` to open the overlay editor
 
 **Checkpoint**: User Story 1 (MVP) concluída e testável de forma independente.
 
@@ -57,15 +57,15 @@
 
 ### Tests for User Story 2
 
-- [ ] T013 [P] [US2] Create integration test for relational edge creation, self-loop rejection, and cascading deletion in `tests/canvas_topology_tests.rs`
+- [X] T013 [P] [US2] Create integration test for relational edge creation, self-loop rejection, and cascading deletion in `tests/canvas_topology_tests.rs`
 
 ### Implementation for User Story 2
 
-- [ ] T014 [US2] Implement anchor ports geometry (`Top`, `Bottom`, `Left`, `Right`) and hover indicators on nodes in `src/components/canvas/PixiRenderer.ts`
-- [ ] T015 [US2] Implement interactive drag-and-connect mechanic with elastic preview line in `src/components/canvas/PixiRenderer.ts`
-- [ ] T016 [US2] Implement cubic Bézier curve calculation and directional arrow rendering in `src/components/canvas/PixiRenderer.ts`
-- [ ] T017 [US2] Add edge management methods (`createEdge`, `deleteEdge`, `updateEdgeLabel`) with self-loop prevention in `src/stores/canvas.svelte.ts`
-- [ ] T018 [US2] Add keyboard deletion (`Delete` / `Backspace`) for selected edges in `src/components/canvas/CanvasViewport.svelte`
+- [X] T014 [US2] Implement anchor ports geometry (`Top`, `Bottom`, `Left`, `Right`) and hover indicators on nodes in `src/components/canvas/PixiRenderer.ts`
+- [X] T015 [US2] Implement interactive drag-and-connect mechanic with elastic preview line in `src/components/canvas/PixiRenderer.ts`
+- [X] T016 [US2] Implement cubic Bézier curve calculation and directional arrow rendering in `src/components/canvas/PixiRenderer.ts`
+- [X] T017 [US2] Add edge management methods (`createEdge`, `deleteEdge`, `updateEdgeLabel`) with self-loop prevention in `src/stores/canvas.svelte.ts`
+- [X] T018 [US2] Add keyboard deletion (`Delete` / `Backspace`) for selected edges in `src/components/canvas/CanvasViewport.svelte`
 
 **Checkpoint**: User Stories 1 e 2 operam de forma integrada e independente.
 
@@ -79,13 +79,13 @@
 
 ### Tests for User Story 3
 
-- [ ] T019 [P] [US3] Create integration test for two-phase atomic commit of `board.canvas.json` and OCC collision recovery in `tests/atomic_persistence_tests.rs`
+- [X] T019 [P] [US3] Create integration test for two-phase atomic commit of `board.canvas.json` and OCC collision recovery in `tests/atomic_persistence_tests.rs`
 
 ### Implementation for User Story 3
 
-- [ ] T020 [US3] Implement canonical cell file writer (`cells/<id>.md`) with YAML frontmatter in `src-tauri/src/infra/fs/canvas_io.rs`
-- [ ] T021 [US3] Update `CanvasStore.saveTopology` in `src/stores/canvas.svelte.ts` to write both `board.canvas.json` and modified `cells/*.md`
-- [ ] T022 [US3] Add optimistic concurrency conflict notification and automatic reload banner in `src/components/canvas/CanvasViewport.svelte`
+- [X] T020 [US3] Implement canonical cell file writer (`cells/<id>.md`) with YAML frontmatter in `src-tauri/src/infra/fs/canvas_io.rs`
+- [X] T021 [US3] Update `CanvasStore.saveTopology` in `src/stores/canvas.svelte.ts` to write both `board.canvas.json` and modified `cells/*.md`
+- [X] T022 [US3] Add optimistic concurrency conflict notification and automatic reload banner in `src/components/canvas/CanvasViewport.svelte`
 
 **Checkpoint**: Persistência canônica dupla (topologia e células) validada em disco.
 
@@ -99,13 +99,13 @@
 
 ### Tests for User Story 4
 
-- [ ] T023 [P] [US4] Create unit test for Frustum Culling AABB calculation and LOD threshold bounds in `tests/integration/test_lod_performance.rs`
+- [X] T023 [P] [US4] Create unit test for Frustum Culling AABB calculation and LOD threshold bounds in `tests/lod_performance_tests.rs`
 
 ### Implementation for User Story 4
 
-- [ ] T024 [US4] Implement AABB viewport bounding box calculation and node visibility culling in `src/components/canvas/PixiRenderer.ts`
-- [ ] T025 [US4] Implement Level of Detail (LOD) rendering layers (macro block vs. detailed text) based on camera zoom in `src/components/canvas/PixiRenderer.ts`
-- [ ] T026 [US4] Implement viewport toolbar controls (zoom in, zoom out, fit to view / centralizar nós, zoom reset 100%) in `src/components/canvas/CanvasControls.svelte`
+- [X] T024 [US4] Implement AABB viewport bounding box calculation and node visibility culling in `src/components/canvas/PixiRenderer.ts`
+- [X] T025 [US4] Implement Level of Detail (LOD) rendering layers (macro block vs. detailed text) based on camera zoom in `src/components/canvas/PixiRenderer.ts`
+- [X] T026 [US4] Implement viewport toolbar controls (zoom in, zoom out, fit to view / centralizar nós, zoom reset 100%) in `src/components/canvas/CanvasControls.svelte`
 
 **Checkpoint**: Todas as 4 estórias de usuário operando a 60 FPS com persistência canônica e edição modular.
 
@@ -115,8 +115,8 @@
 
 **Purpose**: Sincronização, suporte a navegador web puro e validação de qualidade
 
-- [ ] T027 [P] Update browser mock handler in `src/services/ipc.ts` to support `load_board_topology`, `save_board_topology`, and `save_workspace_cell` in `localhost:1420`
-- [ ] T028 Run full test suite (`cargo test --no-default-features --tests`, `npm.cmd run check`, `npm.cmd run build`) and validate against scenarios in `specs/004-spatial-canvas-modular/quickstart.md`
+- [X] T027 [P] Update browser mock handler in `src/services/ipc.ts` to support `load_board_topology`, `save_board_topology`, and `save_workspace_cell` in `localhost:1420`
+- [X] T028 Run full test suite (`cargo test --no-default-features --tests`, `npm.cmd run check`, `npm.cmd run build`) and validate against scenarios in `specs/004-spatial-canvas-modular/quickstart.md`
 
 ---
 

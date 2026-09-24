@@ -37,6 +37,7 @@ fn test_fork_on_insert_cell_promotion() {
         color_preset: Some("blue".to_string()),
         item_id: Some(item.id.clone()),
         local_cell_path: Some(item.canonical_uri.clone()),
+        node_type: Some("note".to_string()),
     };
 
     let mut topology = CanvasStorage::load_topology(&guard, workspace_id)

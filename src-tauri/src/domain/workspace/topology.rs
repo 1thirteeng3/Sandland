@@ -1,11 +1,14 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
 pub enum NodeSide {
+    #[serde(alias = "left", alias = "Left")]
     Left,
+    #[serde(alias = "right", alias = "Right")]
     Right,
+    #[serde(alias = "top", alias = "Top")]
     Top,
+    #[serde(alias = "bottom", alias = "Bottom")]
     Bottom,
 }
 
@@ -40,6 +43,7 @@ pub struct CanvasNode {
     pub width: f32,
     pub height: f32,
     pub color_preset: Option<String>,
+    pub node_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,6 +65,8 @@ pub struct BoardTopology {
     pub viewport: ViewportState,
     pub nodes: Vec<CanvasNode>,
     pub edges: Vec<CanvasEdge>,
+    #[serde(default)]
+    pub revision: u64,
     pub updated_at: i64,
 }
 
@@ -71,7 +77,36 @@ impl BoardTopology {
             viewport: ViewportState::default(),
             nodes: Vec::new(),
             edges: Vec::new(),
+            revision: 1,
             updated_at: chrono::Utc::now().timestamp(),
         }
+    }
+
+    /// Valida invariantes da topologia
+    pub fn validate(&self) -> Result<(), String> {
+        for edge in &self.edges {
+            if edge.source_node_id == edge.target_node_id {
+                return Err(format!("Auto-loop detectado e rejeitado na aresta '{}'", edge.id));
+            }
+        }
+        Ok(())
+    }
+
+    /// Remove um nó e executa a exclusão em cascata de todas as arestas vinculadas
+    pub fn delete_node(&mut self, node_id: &str) {
+        self.nodes.retain(|n| n.id != node_id);
+        self.edges.retain(|e| e.source_node_id != node_id && e.target_node_id != node_id);
+        self.updated_at = chrono::Utc::now().timestamp();
+    }
+
+    /// Adiciona uma aresta garantindo que não seja auto-loop
+    pub fn add_edge(&mut self, edge: CanvasEdge) -> Result<(), String> {
+        if edge.source_node_id == edge.target_node_id {
+            return Err("Arestas não podem conectar um nó a ele mesmo".to_string());
+        }
+        self.edges.retain(|e| e.id != edge.id);
+        self.edges.push(edge);
+        self.updated_at = chrono::Utc::now().timestamp();
+        Ok(())
     }
 }
